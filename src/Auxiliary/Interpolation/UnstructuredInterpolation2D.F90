@@ -347,7 +347,7 @@ module UnstructuredInterpolant2D
             call wall_time(t_end)
 
             ! Display
-            print *, 'Time to construct A and B matrix: ', t_end - t_start, 'seconds'
+            !print *, 'Time to construct A and B matrix: ', t_end - t_start, 'seconds'
 
         end if
 
@@ -409,7 +409,7 @@ module UnstructuredInterpolant2D
         call wall_time(t_end)
 
         ! Display
-        print *, 'Time to compute interpolant aij coefficients: ', t_end - t_start, 'seconds'
+        !print *, 'Time to compute interpolant aij coefficients: ', t_end - t_start, 'seconds'
 
         end associate
 
@@ -454,7 +454,7 @@ module UnstructuredInterpolant2D
         case ('finite_element')
 
             if (size(xq) .gt. 1000) then
-                print *, 'Use OMP interpolant evaluation'
+                !print *, 'Use OMP interpolant evaluation'
                 call EvaluateUnstructuredInterpolant2DFinElemOMP(interp, xq, yq, derivx, derivy, vq)
             else 
                  call EvaluateUnstructuredInterpolant2DFinElem(interp, xq, yq, derivx, derivy, vq)
@@ -663,7 +663,7 @@ module UnstructuredInterpolant2D
         call wall_time(t_end)
 
         ! Display
-        print *, 'Time to evaluate interpolant: ', t_end - t_start, 'seconds'
+        !print *, 'Time to evaluate interpolant: ', t_end - t_start, 'seconds'
 
     end subroutine
     subroutine EvaluateUnstructuredInterpolant2DFinElemOMP(interp, xq, yq, derivx, derivy, vq)
@@ -795,7 +795,7 @@ module UnstructuredInterpolant2D
         call wall_time(t_end)
 
         ! Display
-        print *, 'Time to evaluate interpolant: ', t_end - t_start, 'seconds'
+        !print *, 'Time to evaluate interpolant: ', t_end - t_start, 'seconds'
 
     end subroutine
 

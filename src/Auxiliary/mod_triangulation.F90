@@ -437,9 +437,7 @@ module mod_triangulation
         call wall_time(t_end)
 
         ! Display
-        print *, 'Time to construct GR coefficients: ', t_end - t_start, ' seconds'
-        !print *, 'Time to construct GR stencil per vertex: ', delta_t1, ' seconds'
-        !print *, 'Time to construct GR compute coef per vertex: ', delta_t2, ' seconds'
+        !print *, 'Time to construct GR coefficients: ', t_end - t_start, ' seconds'
 
     end subroutine
 
