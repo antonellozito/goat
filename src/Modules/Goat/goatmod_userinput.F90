@@ -117,7 +117,6 @@ module goatmod_userinput
         character(:), allocatable   :: gridfilepath
         character(:), allocatable   :: structurefilepath
         character(:), allocatable   :: magneticfieldfilepath
-        character(:), allocatable   :: statefilepath
         character(:), allocatable   :: writefilepath
 
         ! Output options
@@ -674,10 +673,15 @@ module goatmod_userinput
         ! Structure used to keep all other possible necessary 
         ! structures that do not immediately fall under the grid, vessel
         ! or magnetic field. Currently empty. 
+        ! - readstate: logical to read state
+        ! - readstatemeth: method to read state, can be 'b2fstate' or 'b2fplasmf'
 
         character(:), allocatable   :: type
         character(:), allocatable   :: filepath
         character(:), allocatable   :: vesselfilepath
+        logical                     :: readstate
+        character(:), allocatable   :: readstatemeth
+        character(:), allocatable   :: statefilepath
 
     contains 
 
@@ -1062,8 +1066,6 @@ module goatmod_userinput
         options%debug           = .false. 
         options%meth            = 'GD'
         options%gdinputfilepath = './GOAToptions.dat'
-        options%readstate       = .false.
-        options%readstatemeth   = 'b2fplasmf'
 
         ! Specify input filenames
         if (solps) then 
@@ -1071,12 +1073,10 @@ module goatmod_userinput
             options%gridfilepath            = solps_gridfilepath
             options%structurefilepath       = solps_structurefilepath
             options%magneticfieldfilepath   = solps_magneticfieldfilepath
-            options%statefilepath           = solps_statefilepath
         else
             options%gridfilepath            = './traduit.out.b2us'
             options%structurefilepath       = './structure.dat'
             options%magneticfieldfilepath   = './rzpsi.dat'
-            options%statefilepath           = './b2fplasmf'
         end if 
         
 
@@ -1385,6 +1385,18 @@ module goatmod_userinput
         options%type = 'vessel'
         options%vesselfilepath = options%inputfilepath
 
+        ! Carry over some goatoptions to environmentoptions
+        options%readstate       = .false.
+        options%readstatemeth   = 'b2fplasmf'
+        
+        ! Specify input filename
+        if (solps) then
+            ! SOLPS default
+            options%statefilepath           = solps_statefilepath
+        else
+            options%statefilepath           = './b2fplasmf'
+        end if
+
         ! Set data
 
     end subroutine
@@ -1664,14 +1676,8 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%structurefilepath)
         field = 'goat.magneticfieldfilepath'
         call ExtractOptionValueCharacter(fid, field, options%magneticfieldfilepath)
-        field = 'goat.statefilepath'
-        call ExtractOptionValueCharacter(fid, field, options%statefilepath)
         field = 'goat.GDinputfilepath'
         call ExtractOptionValueCharacter(fid, field, options%gdinputfilepath)
-        field = 'goat.readstate'
-        call ExtractOptionValueLogical0D(fid, field, options%readstate)
-        field = 'goat.readstatemeth'
-        call ExtractOptionValueCharacter(fid, field, options%readstatemeth)
 
         ! Output options
         field = 'goat.writefilepath'
@@ -2330,7 +2336,8 @@ module goatmod_userinput
         class(EnvironmentOptionsUDT)    :: options 
 
         ! Auxiliary
-        integer                         :: openstatus 
+        integer                         :: openstatus
+        character(:), allocatable       :: field 
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -2356,7 +2363,12 @@ module goatmod_userinput
         
         ! Read options
         !=============
-        ! Nothing to be read in currently
+        field = 'goat.statefilepath'
+        call ExtractOptionValueCharacter(fid, field, options%statefilepath)        
+        field = 'goat.readstate'
+        call ExtractOptionValueLogical0D(fid, field, options%readstate)
+        field = 'goat.readstatemeth'
+        call ExtractOptionValueCharacter(fid, field, options%readstatemeth)
 
         ! Housekeeping
         !=============

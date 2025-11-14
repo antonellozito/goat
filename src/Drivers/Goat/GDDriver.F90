@@ -22,7 +22,6 @@ subroutine GDDriver(goatoptions)
     type(GridUDT)               :: grid 
     type(MagneticFieldUDT)      :: magneticField 
     type(EnvironmentUDT)        :: environment
-    type(StateUDT)              :: state
 
     ! Other options
     type(GDoptionsUDT)          :: gdoptions
@@ -32,7 +31,7 @@ subroutine GDDriver(goatoptions)
     ! Initialize
     !===========
     ! Read and extract data
-    call ExtractGoatData(grid, magneticField, environment, state, goatoptions)
+    call ExtractGoatData(grid, magneticField, environment, goatoptions)
 
     ! Set grid deformation options
     gdoptions%inputfilepath = goatoptions%inputfilepath

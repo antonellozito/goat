@@ -23,7 +23,6 @@ subroutine GAGDDriver(goatoptions)
     type(GridUDT)               :: grid 
     type(MagneticFieldUDT)      :: magneticField 
     type(EnvironmentUDT)        :: environment
-    type(StateUDT)              :: state
 
     ! Other options
     type(GAoptionsUDT)          :: gaoptions
@@ -36,7 +35,7 @@ subroutine GAGDDriver(goatoptions)
     ! Initialize
     !===========
     ! Read and extract data
-    call ExtractGoatData(grid, magneticField, environment, state, goatoptions)
+    call ExtractGoatData(grid, magneticField, environment, goatoptions)
 
     ! Set grid adaptation and deformation options
     gaoptions%inputfilepath         = goatoptions%inputfilepath
@@ -55,13 +54,13 @@ subroutine GAGDDriver(goatoptions)
     call TranslateGridTOGAGrid(grid,GAgrid)
 
     ! Run adaptations
-    call GridAdaptor(GAgrid,environment,magneticField,state,gaoptions)
+    call GridAdaptor(GAgrid, environment, magneticField, gaoptions)
 
     ! Translate GAGrid to Grid
-    call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)
+    call TranslateGAGridTOGrid(grid, GAgrid, gaoptions)
 
     ! Post-processing
-    call PostProcessingGridInformation(grid,magneticField,gaoptions)
+    call PostProcessingGridInformation(grid, magneticField, gaoptions)
 
     ! Grid data
     call WriteGOAT(goatoptions, grid, magneticField, environment)

@@ -709,6 +709,7 @@ module goatmod_types
         ! method of the vessel structure?
 
         type(VesselUDT)                 :: vessel
+        type(StateUDT)                  :: state    
 
     contains
 
@@ -4885,7 +4886,7 @@ module goatmod_types
         end if
     end subroutine
     ! Main reader
-    subroutine ReadState(state, options, nc)
+    subroutine ReadState(state, options)
 
         ! Description
         !============
@@ -4894,8 +4895,7 @@ module goatmod_types
         ! Declare variables
         !==================
         type(StateUDT)                  :: state
-        type(GoatoptionsUDT)            :: options 
-        integer(I8)                     :: nc
+        type(EnvironmentOptionsUDT)     :: options 
         
         ! Loop variables
     
@@ -4912,12 +4912,12 @@ module goatmod_types
             case ('b2fstate')
 
                 ! Read b2fstate file
-                call ReadB2fstate(state, options%statefilepath, nc)
+                call ReadB2fstate(state, options%statefilepath)
 
             case ('b2fplasmf')
 
                 ! Read b2fplasmf file
-                call ReadB2fplasmf(state, options%statefilepath, nc)
+                call ReadB2fplasmf(state, options%statefilepath)
 
             case default
 
@@ -4926,14 +4926,12 @@ module goatmod_types
 
             end select
 
-
-
         end if
 
     end subroutine
 
     ! Specific readers
-    subroutine ReadB2fstate(state, filepath, nctot)
+    subroutine ReadB2fstate(state, filepath)
 
         ! Description
         !============
@@ -4944,7 +4942,6 @@ module goatmod_types
         ! Arguments
         type(StateUDT), intent(inout)   :: state
         character(:), allocatable       :: filepath    
-        integer(I8)                     :: nctot
 
         ! Auxiliary
         integer(I8) :: nc, nf, ns, filespec, idum(0:9)
@@ -5019,7 +5016,7 @@ module goatmod_types
 
     end subroutine
 
-    subroutine ReadB2fplasmf(state, filepath, nctot)
+    subroutine ReadB2fplasmf(state, filepath)
 
         ! Description
         !============
@@ -5030,7 +5027,6 @@ module goatmod_types
         ! Arguments
         type(StateUDT), intent(inout)   :: state
         character(:), allocatable       :: filepath 
-        integer(I8)                     :: nctot
 
         ! Auxiliary
         integer(I8) :: nc, nf, ns, filespec, idum(0:9)
@@ -5140,7 +5136,7 @@ module goatmod_types
     
         ! Notes
         !======
-        ! Right now, only the vessel is added.
+        ! The vessel is added and also state information for a simulation.
     
         ! The usual
         implicit none 
@@ -5186,6 +5182,9 @@ module goatmod_types
             call gdErrorHandler('Unknown environment type')
     
         end select
+
+        ! State information
+        call ReadState(environment%state, environmentoptions)
     
     end subroutine
 
@@ -7586,7 +7585,7 @@ module goatmod_types
     end subroutine
 
     ! Data extraction for other goat drivers (GD, GA, ...)
-    subroutine ExtractGoatData(grid, magneticField, environment, state, options)
+    subroutine ExtractGoatData(grid, magneticField, environment, options)
 
         ! Description
         !============
@@ -7600,7 +7599,6 @@ module goatmod_types
         type(GridUDT)                       :: grid 
         type(MagneticFieldUDT)              :: magneticField 
         type(EnvironmentUDT)                :: environment 
-        type(StateUDT)                      :: state
         type(GoatoptionsUDT)                :: options 
     
         ! Auxiliary 
@@ -7632,7 +7630,11 @@ module goatmod_types
         gridoptions%facelabelsubto          = options%facelabelsubto
     
         ! Reset vessel reading 
-        environmentoptions%vesselfilepath = options%structurefilepath
+        environmentoptions%vesselfilepath   = options%structurefilepath
+
+        ! Carry over some environment options
+        options%readstate                   = environmentoptions%readstate
+        options%readstatemeth               = environmentoptions%readstatemeth
     
         ! Read data
         !==========
@@ -7657,9 +7659,6 @@ module goatmod_types
     
         ! Read magnetic field
         call ReadMagneticField(magneticField, mfoptions, options%magneticfieldfilepath)
-
-        ! Read state
-        call ReadState(state, options, grid%cell%ntot)
     
         ! Read additional data
         !=====================

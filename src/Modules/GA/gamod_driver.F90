@@ -33,7 +33,7 @@ module gamod_driver
     
     contains
 
-    subroutine GridAdaptor(grid,environment,magneticField,state,options)
+    subroutine GridAdaptor(grid, environment, magneticField, options)
 
         ! Description
         !============
@@ -50,12 +50,11 @@ module gamod_driver
         type(GAGridUDT), intent(inout)              :: grid
         type(EnvironmentUDT), intent(in)            :: environment
         type(MagneticFieldUDT), intent(in)          :: magneticField     
-        type(StateUDT), intent(in)                  :: state
         type(GAoptionsUDT), intent(inout)           :: options
 
         ! Initialize grid adaptation
         !===========================
-        call GAinit(grid,options,environment,magneticField)
+        call GAinit(grid, options, environment, magneticField)
         
 
         ! Driver Selection
@@ -70,7 +69,7 @@ module gamod_driver
         case ('aposteriori')
 
             ! Grid adaptation based on simulation information
-            call GAapostDriver(grid, options, environment, magneticField, state) 
+            call GAapostDriver(grid, options, environment, magneticField) 
 
         case default
 
@@ -81,7 +80,7 @@ module gamod_driver
 
         ! Postprocessing
         !===============
-        call PostProcessGA(grid,magneticField,options)
+        call PostProcessGA(grid, magneticField, options)
 
     end subroutine
 
@@ -317,7 +316,7 @@ module gamod_driver
 
     end subroutine
 
-    subroutine GAapostDriver(grid, options, environment, magneticField, state)
+    subroutine GAapostDriver(grid, options, environment, magneticField)
 
         ! Description
         !============
@@ -331,15 +330,18 @@ module gamod_driver
         type(GAoptionsUDT), intent(inout)   :: options
         type(EnvironmentUDT), intent(in)    :: environment
         type(MagneticFieldUDT), intent(in)  :: magneticField
-        type(StateUDT), intent(in)          :: state
 
         ! Auxiliary
         integer(I8) :: j, split_cv
         type(TriangulationUDT)              :: triangulation
+        type(StateUDT)                      :: state
         type(StateUDT)                      :: state_v
         type(StateUDT)                      :: state_int
         type(UnstructuredInterpolant2DUDT)  :: interp
         type(QualityMetricUDT)              :: qm
+
+        ! Unpack state
+        state = environment%state
 
         ! Interpolation
         !==============
