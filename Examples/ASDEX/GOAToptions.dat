@@ -443,6 +443,10 @@ VERSION 1.00.00
 'gg.tm.mergetubes.meth'         'extensive'
 'gg.tm.dpsimintubes'            '0.0'
 'gg.tm.lradmintubes'            '2.0e-3'
+'gg.tm.mergetubes.allowseparatrix'     '0'
+
+'gg.tm.simplifyseparatrix'      '1'
+'gg.tm.simplifyseparatrix.lpolsepmin'   '1e-3'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'

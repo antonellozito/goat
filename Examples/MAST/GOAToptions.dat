@@ -443,7 +443,7 @@ VERSION 1.00.00
 'gg.tm.field.resx'              '400'
 'gg.tm.field.resy'              '400'
 'gg.tm.field.donewton'          '1'
-'gg.tm.fieldtol'                '1e-8'
+'gg.tm.fieldtol'                '0e-8'
 
 # Tangency point tangency point treatment 
 'gg.tm.dotpvesselbased'         '1' # best used in combination with vessel refinement
@@ -470,6 +470,10 @@ VERSION 1.00.00
 'gg.tm.mergetubes.meth'         'extensive'
 'gg.tm.dpsimintubes'            '0.0'
 'gg.tm.lradmintubes'            '5.0e-4'
+'gg.tm.mergetubes.allowseparatrix'     '1'
+
+'gg.tm.simplifyseparatrix'      '1'
+'gg.tm.simplifyseparatrix.lpolsepmin'   '1e-3'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
