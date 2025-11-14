@@ -128,6 +128,7 @@ contains
         real(R8), parameter                     :: emptyR8(0)= 0
         integer(I8)                             :: nv
         integer(I8), parameter                  :: emptyI8(0) = 0
+        logical, parameter                      :: emptyL(0) = .false.
 
         ! Loop
 
@@ -194,13 +195,13 @@ contains
         ! Field contours
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyi8, topomeshoptions%npmin, &
+            emptyR8, emptyR8, emptyR8, emptyi8, emptyL, topomeshoptions%npmin, &
             topomeshoptions%npmax, topomeshoptions%dl)
 
         ! Vessel contours
         boundarytracer = ConstructStructuredTracer(&
             reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyI8, topomeshoptions%npmin, &
+            emptyR8, emptyR8, emptyR8, emptyI8, emptyL, topomeshoptions%npmin, &
             topomeshoptions%npmax, topomeshoptions%dl)
 
         ! Orthogonal lines
@@ -326,6 +327,7 @@ contains
         real(R8), parameter                     :: emptyR8(0)= 0
         integer(I8)                             :: nv
         integer(I8), parameter                  :: emptyI8(0) = 0
+        logical, parameter                      :: emptyL(0) = .false.
 
         ! Initialize
         !===========
@@ -375,7 +377,7 @@ contains
         ! Vessel contours
         boundarytracer = ConstructStructuredTracer(&
             reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyI8, topomeshoptions%npmin, &
+            emptyR8, emptyR8, emptyR8, emptyI8, emptyL, topomeshoptions%npmin, &
             topomeshoptions%npmax, topomeshoptions%dl)
 
         ! Set logicals
@@ -409,6 +411,7 @@ contains
         real(R8), parameter                     :: emptyR8(0)= 0
         integer(I8)                             :: nv
         integer(I8), parameter                  :: emptyI8(0) = 0
+        logical, parameter                      :: emptyL(0) = .false.
 
         ! Initialize
         !===========
@@ -462,7 +465,7 @@ contains
         ! Field contours
         fieldtracer = ConstructStructuredTracer(&
             reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-            emptyR8, emptyR8, emptyR8, emptyi8, topomeshoptions%npmin, &
+            emptyR8, emptyR8, emptyR8, emptyi8, emptyL, topomeshoptions%npmin, &
             topomeshoptions%npmax, topomeshoptions%dl)
 
         ! Orthogonal lines

@@ -2458,8 +2458,8 @@ def ReadRZPsiFromEqdskFile(filepath):
 
     # Read first line: comment, dummy, nR, nZ 
     values = alllines[i].split()
-    nR = np.fromstring(values[2], dtype=int, count=1, sep =' '); nR = nR[0]
-    nZ = np.fromstring(values[3], dtype=int, count=1, sep =' '); nZ = nZ[0]
+    nR = np.fromstring(values[-2], dtype=int, count=1, sep =' '); nR = nR[0]
+    nZ = np.fromstring(values[-1], dtype=int, count=1, sep =' '); nZ = nZ[0]
     i = i + 1
 
     # Read next numbers
@@ -2514,6 +2514,9 @@ def ReadRZPsiFromEqdskFile(filepath):
 
         # Update counter
         i = i + 1
+
+    # Divide by 2*Pi
+    Psi = Psi/(2.0*np.pi)
 
     # Return
     return R, Z, Psi
