@@ -231,11 +231,11 @@ module ggmod_topology2D
         real(R8)                                :: dpsimin, lradmin, &
             lpolsepmin 
         real(R8), allocatable, dimension(:)     :: tubedpsi, tubelrad
-        integer(I8), allocatable, dimension(:)  :: illegalfsIDs
+        integer(I8), allocatable, dimension(:)  :: illegalfsIDs, splitfsIDs
         type(RealDynamicArrayUDT), allocatable, dimension(:)    :: &
             facepsi, facedlcrad
         logical                                 :: allowsepmerge, &
-            allowcoremerge, allowpfmerge
+            allowcoremerge, allowpfmerge, allowsepsimplify
         character(:), allocatable               :: mergetubemeth
 
         ! Store locally for convenience
@@ -3186,8 +3186,12 @@ module ggmod_topology2D
             allocate(keepind(size(tvIDs)))
             keepind = .true. 
             do j = 1, size(keepind)-1
-                if (((ts1r(j+1) - ts1r(j)) == 0_R8) .or. (tvIDs(j+1) == tvIDs(j))) then ! Also check vertex ID, since s1r may be off by machine precision 
+                if ((ts1r(j+1) - ts1r(j)) == 0_R8)  then 
                     keepind(j+1) = .false. 
+                end if 
+                ! Also check vertex ID for non-closed polygons, since s1r may be off by machine precision 
+                if ((tvIDs(j+1) == tvIDs(j)) .and. .not. topomesh%face%pol(fID(k))%isclosed) then 
+                    keepind(j+1) = .false.
                 end if 
             end do 
             tvIDs = pack(tvIDs, keepind) ! can simply reduce here, not used afterwards
@@ -5748,6 +5752,7 @@ module ggmod_topology2D
 
         ! Check allocation status
         if (allocated(tmadaptor%illegalfsIDs)) deallocate(tmadaptor%illegalfsIDs)
+        if (allocated(tmadaptor%splitfsIDs)) deallocate(tmadaptor%splitfsIDs)
         if (allocated(tmadaptor%facepsi)) deallocate(tmadaptor%facepsi)
         if (allocated(tmadaptor%facedlcrad)) deallocate(tmadaptor%facedlcrad)
         if (allocated(tmadaptor%tubedpsi)) deallocate(tmadaptor%tubedpsi)
@@ -5758,7 +5763,7 @@ module ggmod_topology2D
         ! Initialize
         allocate(tmadaptor%illegalfsIDs(0), tmadaptor%facepsi(face%ntot), &
             tmadaptor%facedlcrad(face%ntot), tmadaptor%tubedpsi(tube%ntot), &
-            tmadaptor%tubelrad(tube%ntot))
+            tmadaptor%tubelrad(tube%ntot), tmadaptor%splitfsIDs(0))
         allocate(tmadaptor%fieldtracer, source=fieldtracer)
 
         ! Copy (for face data updating later on)
@@ -5772,6 +5777,7 @@ module ggmod_topology2D
         tmadaptor%lradmin = options%lradmintubes
         tmadaptor%lpolsepmin = options%lpolsepmin
         tmadaptor%allowsepmerge = options%mtallowseparatrix
+        tmadaptor%allowsepsimplify = options%simplifyseparatrix
         tmadaptor%allowcoremerge = options%mtallowcore
         tmadaptor%allowpfmerge  = options%mtallowpf
         tmadaptor%mergetubemeth = options%mergetubemeth
@@ -5917,6 +5923,15 @@ module ggmod_topology2D
             ! Is there a complex merge that can be done?
             call tmadaptor%MergeTMTubesComplex(topomesh, options, wasmerged, &
                 appliedsplitting)
+
+            ! In case we merged a set of tubes, we can reset the split
+            ! flux surface IDs (those may be merged over now)
+            if (wasmerged .and. .not. appliedsplitting) then 
+                deallocate(tmadaptor%splitfsIDs)
+                allocate(tmadaptor%splitfsIDs(0))
+            end if 
+
+            ! Write output
             if (wasmerged .or. appliedsplitting) then 
                 if (wasmerged) then 
                     if (options%writedebugoutput) then 
@@ -5939,6 +5954,8 @@ module ggmod_topology2D
         end do 
 
         ! Clean up splitted tubes
+        deallocate(tmadaptor%splitfsIDs)
+        allocate(tmadaptor%splitfsIDs(0))
         call tmadaptor%CleanSplitTMTubes(topomesh)
 
     end subroutine
@@ -6205,9 +6222,10 @@ module ggmod_topology2D
             if (.not. ismergeable(i)) then 
                 ismarkedpair(i) = .false.
                 dvalpair(i) = posinfval_R8()
+                cycle
             end if 
 
-            ! Check if all tubes are mergeable
+            ! Check if all tubes are mergeable if they are legal
             if (.not. any(issplittable([tube1, tube2]))) then 
                 ismarkedpair(i) = .true.
                 dvalpair(i) = minval(dpsi(tube1)) + minval(dpsi(tube2))
@@ -7704,15 +7722,16 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: tracedir, tf1, tf2, &
-            nint, nsl, ntf, nxp, newfsID
+            nint, nsl, ntf, nxp, newfsID, ind1, ind2
         integer(I8), allocatable, dimension(:)  :: allhf, alllf, &
-            sepfaces, thf, tlf, mergevert, mergesepfaces, tf, tubefaces, &
+            sepfaces, thf, tlf, mergevert, mergesepfaces, tubefaces, &
             radialbndf, s1, s2, sepfaceID, xpointID, news2, usepfaceID, &
-            txp, tnews2, sortindex, v1, v2
+            txp, tnews2, sortindex, v1, v2, tvf, tvfna, tuberadface
         logical                                 :: ishfsep, islfsep, &
             isintersectionfound
         logical, allocatable, dimension(:)      :: ismergeface, &
-            isseparatrixface, ishfface, islfface, remf, remv
+            isseparatrixface, ishfface, islfface, remf, remv, &
+            istuberadface
         real(R8)                                :: x1, y1, x2, y2,&
             xb(1:2), yb(1:2), fsfval, xxp, yxp, mindist, tdist, tx1, ty1, &
             tx2, ty2
@@ -7752,10 +7771,14 @@ module ggmod_topology2D
             )
 
         ! Set some useful logicals
-        allocate(ismergeface(face%ntot), isseparatrixface(face%ntot))
+        allocate(ismergeface(face%ntot), isseparatrixface(face%ntot), &
+            istuberadface(face%ntot))
         ismergeface = .false.
         isseparatrixface = .false. 
+        istuberadface = .false. 
         ismergeface(mergefaces) = .true.
+        tuberadface = tube%GetFace(mergetube)
+        istuberadface(tuberadface) = .true. 
 
         ! Extract separatrix 
         !===================
@@ -7811,14 +7834,12 @@ module ggmod_topology2D
         end if
 
         ! Extract vessel faces (has to be two or zero)
-        radialbndf = tube%GetFace(mergetube)
-        radialbndf = pack(radialbndf, face%type(radialbndf) == TMfacebndID)
+        radialbndf = pack(tuberadface, face%type(tuberadface) == TMfacebndID)
 
         ! Sanity checks
         if (size(radialbndf) == 0) then 
             ! The tubes form a closed region  - take any radial face
-            tf = tube%GetFace(mergetube)
-            radialbndf = [radialbndf, tf(1)]
+            radialbndf = [radialbndf, tuberadface(1)]
         elseif (size(radialbndf) == 2) then 
             ! all good
         else
@@ -7839,21 +7860,42 @@ module ggmod_topology2D
         ishfface = .false.
         islfface(alllf) = .true.
         ishfface(allhf) = .true.
+        
+        ! Sanity checks
+        if (all(ishfface(tubefaces)) .or. all(islfface(tubefaces))) then 
+            call gdErrorHandler('CollapseSeparatrixTubeTA: all faces are ' // & 
+                'either high or low flux faces, unexpected.')
+        end if 
         if (ishfsep) then 
-            allocate(sepfaces(size(allhf)), mergesepfaces(size(alllf)))
-            sepfaces = pack(tubefaces, ishfface(tubefaces))
-            sepfaces = sepfaces(size(sepfaces):1:-1)
-            mergesepfaces = pack(tubefaces, islfface(tubefaces))
+            ! Hedge for faces not being stored continuously in mergefaces
+            if (islfface(tubefaces(1)) .and. islfface(tubefaces(size(tubefaces)))) then 
+                ind1 = findloc(.not. islfface(tubefaces), .true., 1, back=.false.)-1
+                ind2 = findloc(.not. islfface(tubefaces), .true., 1, back=.true.)+1
+                mergesepfaces = [tubefaces(ind2:), tubefaces(1:ind1)]
+                sepfaces = tubefaces(ind1+1:ind2-1)
+            else
+                allocate(sepfaces(size(allhf)), mergesepfaces(size(alllf)))
+                sepfaces = pack(tubefaces, ishfface(tubefaces))
+                sepfaces = sepfaces(size(sepfaces):1:-1)
+                mergesepfaces = pack(tubefaces, islfface(tubefaces))
+            end if
         elseif (islfsep) then 
-            allocate(sepfaces(size(alllf)), mergesepfaces(size(allhf)))
-            sepfaces = pack(tubefaces, islfface(tubefaces))
-            sepfaces = sepfaces(size(sepfaces):1:-1)
-            mergesepfaces = pack(tubefaces, ishfface(tubefaces))
+            if (ishfface(tubefaces(1)) .and. ishfface(tubefaces(size(tubefaces)))) then 
+                ind1 = findloc(.not. ishfface(tubefaces), .true., 1, back=.false.)-1
+                ind2 = findloc(.not. ishfface(tubefaces), .true., 1, back=.true.)+1
+                mergesepfaces = [tubefaces(ind2:), tubefaces(1:ind1)]
+                sepfaces = tubefaces(ind1+1:ind2-1)
+            else
+                allocate(sepfaces(size(alllf)), mergesepfaces(size(allhf)))
+                sepfaces = pack(tubefaces, islfface(tubefaces))
+                sepfaces = sepfaces(size(sepfaces):1:-1)
+                mergesepfaces = pack(tubefaces, ishfface(tubefaces))
+            end if
         end if         
 
         ! Extract sorted vertices from sorted merge separatrix faces
-        call ExtractPolygonVertices(topomesh%face%vert(mergefaces, :), &
-            size(mergefaces), mergevert)
+        call ExtractPolygonVertices(topomesh%face%vert(mergesepfaces, :), &
+            size(mergesepfaces), mergevert)
 
         ! Sanity checks
         if (vert%type(mergevert(1)) == TMvertexsaddleID) then 
@@ -7991,10 +8033,6 @@ module ggmod_topology2D
                 end if 
             end if 
         end do 
-
-        ! Trace (in both directions, cause we can't trust )
-        !streamlines = tmadaptor%streamlinetracer%TraceStreamlines(&
-        !    xt, yt, xb, yb, spread(tracedir, 1, size(xt)))
 
         ! Determine streamline intersections
         nsl = size(streamlines)
@@ -8149,14 +8187,38 @@ module ggmod_topology2D
         remf = .false. 
         remv = .false. 
         remf([mergesepfaces, usepfaceID]) = .true. ! separatrix faces to be removed
-        tf = topomesh%tube%GetFace(mergetube)
-        where (topomesh%face%type(tf) /= TMfacebndID) remf(tf) = .true. ! remove non-boundary radial faces of tube
+        where (topomesh%face%type(tuberadface) /= TMfacebndID) remf(tuberadface) = .true. ! remove non-boundary radial faces of tube
         do i = 1, size(mergevert)
             if (.not. any(topomesh%vert%type(mergevert(i)) == &  
                 [TMvertexsaddleID, TMvertexbndID])) then 
                 remv(mergevert(i)) = .true. ! boundary vertices will be removed by the simplification step
             end if 
         end do 
+
+        ! Don't remove radial faces if the vertex also has a radial 
+        ! face in the neighbouring tube (then also don't remove that vertex)
+        do i = 1, size(mergevert)
+            ! Get faces of vertex
+            tvf = topomesh%vert%GetFace(mergevert(i))
+
+            ! Check if it has a non-aligned face in the current tube 
+            ! and a non-aligned face in the neighbouring tube. If so, 
+            ! don't remove the vertex or it's non-aligned faces
+            allocate(tvfna(0))
+            do j = 1, size(tvf)
+                if (any(topomesh%face%type(tvf(j)) == TMfacenonalignedID)) then 
+                    tvfna = [tvfna, tvf(j)]
+                end if 
+            end do 
+            if (any(istuberadface(tvfna)) .and. any(.not. istuberadface(tvfna))) then 
+                ! Don't delete this vertex and faces
+                remv(mergevert(i)) = .false.
+                remf(tvfna) = .false.
+            end if 
+
+            ! Housekeeping
+            deallocate(tvfna)
+        end do
 
         ! Remove faces
         call RemoveTopologicalMeshFaceLogical(topomesh, remf)
@@ -8200,7 +8262,9 @@ module ggmod_topology2D
 
         ! Simplify separatrices
         !======================
-        call tmadaptor%SimplifySeparatrices(topomesh)
+        if (tmadaptor%allowsepsimplify) then 
+            call tmadaptor%SimplifySeparatrices(topomesh)
+        end if 
 
         ! Set output
         wasmerged = .true.
@@ -8851,6 +8915,9 @@ module ggmod_topology2D
             ! Update adaptor data
             call tmadaptor%RemoveFaceData(remf)
             call tmadaptor%AddFaceData(topomesh)
+
+            ! Set this flux surface as illegal surface to merge over 
+            tmadaptor%splitfsIDs = [tmadaptor%splitfsIDs, topomesh%nFs + i]
         end do 
         topomesh%nFs = topomesh%nFs + size(allc)
 
@@ -8986,7 +9053,9 @@ module ggmod_topology2D
 
         ! Unpack
         associate(&
-            illegalfsIDs    => tmadaptor%illegalfsIDs)
+            illegalfsIDs    => tmadaptor%illegalfsIDs,  &
+            splitfsIDs      => tmadaptor%splitfsIDs     &
+            )
 
         ! Check overlapping psi values
         !=============================
@@ -8994,6 +9063,7 @@ module ggmod_topology2D
         allocate(isillegalface(topomesh%face%ntot), isillegalfsID(topomesh%nfs))
         isillegalfsID = .false.
         isillegalfsID(illegalfsIDs) = .true.
+        isillegalfsID(splitfsIDs)   = .true.
 
         ! Set illegal faces to false if they don't have a flux surface ID
         where (topomesh%face%fsID /= 0)
@@ -10251,6 +10321,31 @@ module ggmod_topology2D
         vertexmark = .false.
         vertexmark(vertexmarkIDs) = .true.
 
+        ! Do temporary writing
+        if (options%writedebugoutput) then 
+            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp3', .false.)
+        end if 
+
+        ! Recompute tubes
+        !================
+        
+        ! Data 
+        call AddTopologicalMeshData(topomesh)
+
+        ! Add cells
+        call AddTopologicalMeshCells(topomesh)
+
+        ! Recompute interconnection data
+        call AddTopologicalMeshInterconnectionData(topomesh)
+
+        ! Tubes
+        !======
+        ! Flux tubes
+        call AddTopologicalMeshTubes(topomesh, [TMfaceradID, TMfacebndID])
+
+        ! Additional tube interconnection data
+        call AddTopologicalMeshTubeData(topomesh)
+
         ! Adjust types of aligned boundaries 
         allocate(markedtpIDs(count(vertexmark)))
         markedtpIDs = pack([(k, k = 1, size(vertexmark))], vertexmark)
@@ -10289,49 +10384,6 @@ module ggmod_topology2D
                 end if 
             end if
         end do 
-        do i = 1, topomesh%vert%ntot
-            ! Check if the vertex has the same flux surface ID as one 
-            ! of the marked tangency points and if it's a boundary vertex
-            if (any(topomesh%vert%fsID(i) == topomesh%vert%fsID(markedtpIDs)) .and. &
-                (topomesh%vert%type(i) == TMvertexbndID)) then 
-                ! Get the vertex face neighbours
-                tvf = topomesh%vert%GetFace(i)
-
-                ! If it has an aligned boundary, all other boundary faces 
-                ! should become aligned too 
-                if (any(topomesh%face%type(tvf) == TMfacealbndID)) then 
-                    where (topomesh%face%type(tvf) == TMfacebndID) 
-                        topomesh%face%type(tvf) = TMfacealbndID
-                        topomesh%face%fsID(tvf) = topomesh%vert%fsID(i)
-                    end where
-                end if 
-            end if 
-        end do 
-
-        ! Do temporary writing
-        if (options%writedebugoutput) then 
-            call WriteTopologicalMesh(topomesh, 'topomesh_duringavp3', .false.)
-        end if 
-
-        ! Recompute tubes
-        !================
-        
-        ! Data 
-        call AddTopologicalMeshData(topomesh)
-
-        ! Add cells
-        call AddTopologicalMeshCells(topomesh)
-
-        ! Recompute interconnection data
-        call AddTopologicalMeshInterconnectionData(topomesh)
-
-        ! Tubes
-        !======
-        ! Flux tubes, with aligned boundaries
-        call AddTopologicalMeshTubes(topomesh, [TMfaceradID, TMfacebndID, TMfacealbndID])
-
-        ! Additional tube interconnection data
-        call AddTopologicalMeshTubeData(topomesh)
 
         ! Do temporary writing
         if (options%writedebugoutput) then 
@@ -10397,6 +10449,31 @@ module ggmod_topology2D
                 else 
                     ! Delete the first faces
                     remf(tfnb1) = .true. 
+                end if 
+            end if 
+        end do 
+
+        ! Adjust some boundaries again to be aligned based on which 
+        ! faces that will be removed
+        do i = 1, topomesh%vert%ntot
+            ! Check if the vertex has the same flux surface ID as one 
+            ! of the marked tangency points and if it's a boundary vertex
+            if (any(topomesh%vert%fsID(i) == topomesh%vert%fsID(markedtpIDs)) .and. &
+                (topomesh%vert%type(i) == TMvertexbndID)) then 
+                ! Get the vertex face neighbours
+                tvf = topomesh%vert%GetFace(i)
+
+                ! If it has an aligned boundary, and if one of its
+                ! neighbouring faces is an aligned face that 
+                ! was marked for deletion, then  all other boundary faces 
+                ! should become aligned too - otherwise non-conforming
+                ! tubes may exist
+                if (any(topomesh%face%type(tvf) == TMfacealbndID) .and. &
+                    any(remf(tvf))) then 
+                    where (topomesh%face%type(tvf) == TMfacebndID) 
+                        topomesh%face%type(tvf) = TMfacealbndID
+                        topomesh%face%fsID(tvf) = topomesh%vert%fsID(i)
+                    end where
                 end if 
             end if 
         end do 
