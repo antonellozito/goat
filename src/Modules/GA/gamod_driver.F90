@@ -341,7 +341,7 @@ module gamod_driver
         type(QualityMetricUDT)              :: qm
 
         ! Unpack state
-        state = environment%state
+        state = environment%SOLPSstate
 
         ! Interpolation
         !==============

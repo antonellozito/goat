@@ -701,15 +701,14 @@ module goatmod_types
         !============
         ! Overarching type that stores all other structures etc which 
         ! may be needed for grid optimization, and which are not 
-        ! related to the grid or the magnetic field. Currently, only
-        ! the vessel structure is stored here. 
+        ! related to the grid or the magnetic field.
 
         ! Note: the routine to set up the vessel is currently a 
         ! standalone routine. Should we include it here as a 
         ! method of the vessel structure?
 
         type(VesselUDT)                 :: vessel
-        type(StateUDT)                  :: state    
+        type(StateUDT)                  :: SOLPSstate    
 
     contains
 
@@ -5184,7 +5183,7 @@ module goatmod_types
         end select
 
         ! State information
-        call ReadState(environment%state, environmentoptions)
+        call ReadState(environment%SOLPSstate, environmentoptions)
     
     end subroutine
 
