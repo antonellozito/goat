@@ -640,11 +640,11 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
-        options%eta = 1e-5 ! in coordinate units
+        options%lambda = 0e0_R8
+        options%eta = 1e-5_R8 ! in coordinate units
         options%dovessel = .false.
-        options%lengthparam = 0.1 ! in coordinate units
-        options%biasatvessel = 1
+        options%lengthparam = 0.1_R8 ! in coordinate units
+        options%biasatvessel = 1_R8
 
     end subroutine
 
@@ -662,8 +662,8 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata           = 1
-        options%lambda              = 1e0
-        options%eta                 = 1e-5 ! in coordinate units
+        options%lambda              = 0e0_R8
+        options%eta                 = 1e-5_R8 ! in coordinate units
         options%includecutcellfaces = .true.
         options%excludedomainfaces  = .true.
 
@@ -684,12 +684,12 @@ module gdmod_userinput
         !================
         ! Standard options
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
 
         ! Distribution options (weights)
-        options%weightatvessel  = 1
-        options%weightatinf     = 1
-        options%decaylength     = 1
+        options%weightatvessel  = 1_R8
+        options%weightatinf     = 1_R8
+        options%decaylength     = 1_R8
 
     end subroutine
 
@@ -707,12 +707,12 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
         
         ! Distribution options (weights)
-        options%weightatvessel  = 1
-        options%weightatinf     = 1
-        options%decaylength     = 1
+        options%weightatvessel  = 1_R8
+        options%weightatinf     = 1_R8
+        options%decaylength     = 1_R8
 
     end subroutine
 
@@ -730,12 +730,12 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
         
         ! Distribution options (weights)
-        options%weightatvessel  = 1
-        options%weightatinf     = 1
-        options%decaylength     = 1
+        options%weightatvessel  = 1_R8
+        options%weightatinf     = 1_R8
+        options%decaylength     = 1_R8
 
     end subroutine
 
@@ -763,7 +763,7 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
         
         ! Distribution options (weights)
         options%wtatinf         = 1.0_R8
@@ -793,15 +793,15 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
 
-        options%weightatsep = 1
-        options%weightatinf = 1
-        options%weightdecaylength = 0.1 
+        options%weightatsep = 1_R8
+        options%weightatinf = 1_R8
+        options%weightdecaylength = 0.1 _R8
 
-        options%biasatsep = 1
-        options%biasatinf = 1
-        options%biasdecaylength = 0.1
+        options%biasatsep = 1_R8
+        options%biasatinf = 1_R8
+        options%biasdecaylength = 0.1_R8
 
     end subroutine
 
@@ -869,7 +869,7 @@ module gdmod_userinput
         ! Default options
         !================
         options%type        = 'polygon'
-        options%psitol      = 0 
+        options%psitol      = 0_R8
 
     end subroutine
 
@@ -932,7 +932,7 @@ module gdmod_userinput
         options%includecutcellvert = .false.
         options%checkperp = 0 
         options%includecutcellvert = .false. 
-        options%epsperp = 0.2
+        options%epsperp = 0.2_R8
         options%includecorevert = .true.
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy, &
@@ -960,8 +960,8 @@ module gdmod_userinput
         options%doTP = 1
         options%doWG = 0
         options%doxpointedges = 0
-        options%edgedistvessel = 1e-3
-        options%edgedistxpoint = 1e-3
+        options%edgedistvessel = 1e-3_R8
+        options%edgedistxpoint = 1e-3_R8
 
         ! Goat data options
         options%usegoatdata = .true. 
@@ -1003,8 +1003,8 @@ module gdmod_userinput
         options%poloidal    = .true. 
         options%radial      = .true. 
         options%vessel      = .true.
-        options%smallnumber = 1e-6
-        options%fieldtol    = 1e-10
+        options%smallnumber = 1e-6_R8
+        options%fieldtol    = 1e-10_R8
 
     end subroutine
 
