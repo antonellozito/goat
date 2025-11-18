@@ -549,6 +549,41 @@ module gdmod_costfunction
 
     end type
 
+    ! Regularization term cost function
+    type, extends(CostFunctionGDUDT) :: CostFunctionRTUDT
+
+        ! Description
+        !============
+        ! Regularization cost function that can be used to penalize 
+        ! different contributions. See the initialization routine for
+        ! more details on the formula's used etc. Right now, regularization
+        ! is done by penalizing the distance between the new and initial
+        ! coordinates. This should prevent large grid deformations to 
+        ! take place. Results may vary, however, since the amount of
+        ! deformation depends on the relative weights between this 
+        ! cost function and the others, and on the specific case that 
+        ! is considered. 
+
+        ! Notes
+        !======
+        real(R8)                                    :: lambda
+        real(R8), allocatable, dimension(:)         :: x0, y0, d0, wt
+
+    contains 
+
+        ! Initialization
+        procedure :: Initialize         => InitializeCostfunctionRT
+
+        ! Evaluation
+        procedure :: Evaluate           => EvaluateCostFunctionRT
+
+        ! Housekeeping
+        procedure :: Allocate           => AllocateCostFunctionRT
+        procedure :: Deallocate         => DeallocateCostFunctionRT
+        final :: DestroyCostFunctionRT
+
+    end type
+
     ! Cost function with all possible contributions
     type, extends(CostfunctionGDUDT) :: CostfunctionGeneralUDT
 
@@ -573,10 +608,11 @@ module gdmod_costfunction
         type(CostfunctionLRrad2UDT)     :: cfv_lrrad
         type(CostfunctionCAUDT)         :: cfv_ca
         type(CostfunctionLDUDT)         :: cfv_ld
+        type(CostfunctionRTUDT)         :: cfv_rt
 
         ! Switches
         logical                         :: doLR, doFA, doFAD, doPRPB, &
-            doLRrad, doCA, doLD
+            doLRrad, doCA, doLD, doRT
 
     contains 
 
@@ -7072,6 +7108,273 @@ module gdmod_costfunction
     end subroutine
 
     !------------------------------------------------------------------!
+    !                      REGULARIZATION TERM                         !
+    !------------------------------------------------------------------!
+
+    ! Initialization
+    subroutine InitializeCostFunctionRT(costfunction, grid, &
+        magneticField, environment, options)
+
+        ! Description
+        !============
+        ! Initialize the cost function and its parameters based on the 
+        ! grid, magnetic field, and environment structures. 
+
+        ! Simply call the initialization of the original lenght ratio
+        ! cost function. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionRTUDT)            :: costfunction
+        type(GridUDT)                       :: grid
+        type(MagneticFieldUDT)              :: magneticField 
+        type(EnvironmentUDT)                :: environment 
+        type(CostFunctionOptionsUDT)        :: options
+        
+        ! Initialize
+        !===========
+        ! Initial coordinates
+        costfunction%x0 = grid%vert%x
+        costfunction%y0 = grid%vert%y
+        
+        ! Weights (just one for now)
+        costfunction%wt = spread(1.0_R8, 1, size(grid%vert%x))
+        
+        ! Length scale
+        costfunction%d0 = options%rt%d0*spread(1.0_R8, 1, size(grid%vert%x))
+
+        ! Scaling constant
+        costfunction%lambda = options%rt%lambda
+
+    end subroutine
+
+    ! Cost function evaluation
+    subroutine EvaluateCostFunctionRT(costfunction, J, gradJ, hessJ, &
+        grid, magneticField, environment, dogradient, dohessian, &
+        designvariables, varin, valuesin, dJdvarin, dgradJdvarin)
+
+        ! Description
+        !============
+        ! Evaluate the cost function, the gradient and its hessian. The
+        ! cost function is defined as (per vertex):
+        ! 
+        !   J_i = 0.5*wt_i*(d_i/d0_i)**2
+        !
+        ! where d_i is the distance between the current vertex 
+        ! coordinates and the initial coordinates. Summation over all
+        ! vertices then yields the total cost function. d0_i is a 
+        ! length scale that can be interpreted as a measure of how 
+        ! much a vertex can move without being penalized much. 
+
+        ! Notes:
+        !=======
+        ! Note: other functions for d_i/d0_i may be considered as well, 
+        ! e.g. an exponential function or the L1 norm. However, the 
+        ! L2 norm of the distance yields an easy quadratic expression in 
+        ! terms of the coordinates and should hence be easy to deal with
+        ! by the optimizer. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionRTUDT)        :: costfunction 
+        real(R8)                        :: J
+        real(R8), allocatable           :: gradJ(:) 
+        type(MySparseUDT)               :: hessJ 
+        type(GridUDT)                   :: grid 
+        type(MagneticFieldUDT)          :: magneticField 
+        type(EnvironmentUDT)            :: environment
+        logical                         :: dogradient, dohessian 
+        class(DesignVariablesGDUDT)     :: designvariables
+
+        ! Optional arguments
+        character(*), intent(in), optional  :: varin 
+        real(R8), intent(in), optional      :: valuesin(:)
+        real(R8), allocatable, optional     :: dJdvarin(:) 
+        type(MySparseUDT), optional         :: dgradJdvarin
+
+        character(:), allocatable           :: var
+        real(R8), allocatable               :: values(:)
+        real(R8), allocatable               :: dJdvar(:) 
+        type(MySparseUDT)                   :: dgradJdvar
+
+        ! Loop variables
+        integer(I8)                     :: k
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: d, rat
+
+        ! Associate
+        !==========
+        associate(&
+            vert    => grid%vert, &
+            x       => grid%vert%x, &
+            y       => grid%vert%y, &
+            lambda  => costfunction%lambda, &
+            x0      => costfunction%x0, &
+            y0      => costfunction%y0, &
+            wt      => costfunction%wt, &
+            d0      => costfunction%d0 )
+
+        ! Initialize
+        !===========
+        ! Check inputs
+        if (present(varin)) then 
+            var = varin 
+        else
+            var = 'no'
+        end if 
+        if (present(valuesin)) then 
+            values = valuesin 
+        else
+            allocate(values(0))
+        end if 
+
+        ! Cost function
+        J = 0
+
+        ! Gradient
+        gradJ = 0
+
+        ! Compute cost function
+        !======================
+        ! Compute (squared) distance 
+        d = (x - x0)**2 + (y - y0)**2
+
+        ! Compute distance ratio
+        rat = (d/d0**2)
+
+        ! Compute cost function
+        J = 0.5*sum(wt*rat)
+
+        ! Scale
+        J = lambda*J
+
+        ! Compute gradient
+        !=================
+        if (dogradient) then 
+
+            ! Check the design variables
+            select case (trim(designvariables%type))
+
+            case ('coordinates', 'coordinates_desiredflux')
+
+                ! x-contribution
+                gradJ(1:vert%ntot) = wt*((x - x0)/d0**2)
+                
+                ! y-contribution
+                gradJ(vert%ntot+1:2*vert%ntot) = wt*((y - y0)/d0**2)
+
+            case default
+
+                ! Not implemented, throw error
+                call gdErrorHandler('EvaluateCostFunctionLR: gradient' &
+                    // ' not yet implemented for this design variable' &
+                    // ' type')
+
+            end select
+
+            ! Scale
+            gradJ = lambda*gradJ
+
+        end if
+
+        ! Compute hessian
+        !================
+        ! Easy, diagonal matrix
+        hessJ = ConstructMySparse([(k, k = 1, 2*vert%ntot)], &
+            [(k, k = 1, 2*vert%ntot)], [lambda*wt/d0**2, lambda*wt/d0**2], &
+            designvariables%nphi, designvariables%nphi)
+        
+        ! Other derivatives
+        !==================
+        ! No derivatives w.r.t. any other coordinates currently
+        allocate(dJdvar(size(values)))
+        dJdvar = 0
+        dgradJdvar = SpZeros(size(gradJ), size(values))
+
+        ! Housekeeping
+        !=============
+        ! Optional arguments
+        if (present(dJdvarin)) then 
+            dJdvarin = dJdvar 
+        end if 
+        if (present(dgradJdvarin)) then 
+            dgradJdvarin = dgradJdvar
+        end if
+
+        ! Deassociate
+        !============
+        end associate
+
+    end subroutine
+
+    ! Housekeeping
+    subroutine AllocateCostFunctionRT(costfunction, nv)
+
+        ! Description
+        !============
+        ! Allocate cost function variables
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionRTUDT)        :: costfunction
+        integer(I8), intent(in)         :: nv 
+
+        ! Allocate
+        !=========
+        ! First, call soft deallocation
+        call costfunction%Deallocate()
+
+        ! Allocate
+        allocate(costfunction%x0(nv), costfunction%y0(nv), &
+            costfunction%d0(nv), costfunction%wt(nv))
+
+
+
+    end subroutine
+
+    subroutine DeallocateCostFunctionRT(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostfunctionRTUDT)       :: costfunction
+
+        ! Deallocate
+        !===========
+        if (allocated(costfunction%x0)) deallocate(costfunction%x0)
+        if (allocated(costfunction%y0)) deallocate(costfunction%y0)
+        if (allocated(costfunction%d0)) deallocate(costfunction%d0)
+        if (allocated(costfunction%wt)) deallocate(costfunction%wt)
+
+    end subroutine
+
+    subroutine DestroyCostFunctionRT(costfunction)
+
+        ! Description
+        !============
+        ! Deallocate
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(CostfunctionRTUDT)       :: costfunction
+
+        ! Destroy
+        !========
+        call costfunction%Deallocate()
+
+    end subroutine
+
+
+    !------------------------------------------------------------------!
     !                             GENERAL                              !
     !------------------------------------------------------------------!
 
@@ -7106,6 +7409,7 @@ module gdmod_costfunction
         costfunction%doLRrad    = .false.
         costfunction%doCA       = .false.
         costfunction%doLD       = .false. 
+        costfunction%doRT       = .false. 
 
         ! Check based on cost function type
         select case (costfunction%type)
@@ -7118,6 +7422,7 @@ module gdmod_costfunction
             options%LRrad%lambda    = -1
             options%CA%lambda       = -1
             options%LD%lambda       = -1
+            options%RT%lambda       = -1
             
         case ('LR_FAD_FA')
 
@@ -7126,6 +7431,7 @@ module gdmod_costfunction
             options%LRrad%lambda    = -1
             options%CA%lambda       = -1
             options%LD%lambda       = -1
+            options%RT%lambda       = -1
 
         case ('LR_FAD_PRPB')
 
@@ -7134,6 +7440,7 @@ module gdmod_costfunction
             options%LRrad%lambda    = -1
             options%CA%lambda       = -1
             options%LD%lambda       = -1
+            options%RT%lambda       = -1
 
         case ('LR_FAD_PRPB_FA')
 
@@ -7141,6 +7448,7 @@ module gdmod_costfunction
             options%LRrad%lambda    = -1
             options%CA%lambda       = -1
             options%LD%lambda       = -1
+            options%RT%lambda       = -1
 
         case ('LR_FAD_PRPB_LRrad')
 
@@ -7148,12 +7456,14 @@ module gdmod_costfunction
             options%FA%lambda    = -1
             options%CA%lambda       = -1
             options%LD%lambda       = -1
+            options%RT%lambda       = -1
 
         case ('LR_FAD_PRPB_LRrad_FA')
 
             ! Set lambda of other contributions
             options%CA%lambda       = -1
             options%LD%lambda       = -1
+            options%RT%lambda       = -1
 
         case ('general')
 
@@ -7200,6 +7510,11 @@ module gdmod_costfunction
         if (options%LD%lambda > 0) then 
             costfunction%doLD = .true.
             call costfunction%cfv_ld%Initialize(grid, magneticField, &
+                environment, options)
+        end if
+        if (options%RT%lambda > 0) then 
+            costfunction%doRT = .true.
+            call costfunction%cfv_rt%Initialize(grid, magneticField, &
                 environment, options)
         end if
 
@@ -7483,6 +7798,31 @@ module gdmod_costfunction
         !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ld_val_vertices')
         Jv = 0.0_R8
 
+        ! Regularization term
+        if (costfunction%doRT) then 
+            ! Compute
+            call costfunction%cfv_rt%Evaluate(Jtemp, gradJtemp, &
+                hessJtemp, grid, magneticField, environment, dogradient, &
+                dohessian, designvariables, var, values, dJdvartemp, dgradJdvartemp)
+            
+            ! Add
+            J       = J + Jtemp 
+            gradJ   = gradJ + gradJtemp
+            hessJ   = hessJ + hessJtemp
+            dJdvar  = dJdvar + dJdvartemp 
+            dgradJdvar  = dgradJdvar + dgradJdvartemp
+
+            if (any(.not. ieee_is_finite(gradJtemp))) then 
+                print *, 'Non-finite values in gradJ for RT'
+            end if
+
+            ! Deallocate
+            call hessJtemp%Deallocate()
+            call dgradJdvartemp%Deallocate()
+        end if 
+        !call Write3DCoordinateData(grid%vert%x, grid%vert%y, Jv, 'cfv_ld_val_vertices')
+        Jv = 0.0_R8
+
         ! Housekeeping
         !=============
         ! Optional arguments
@@ -7529,6 +7869,7 @@ module gdmod_costfunction
         call costfunction%cfv_lrrad%Deallocate()
         call costfunction%cfv_ca%Deallocate()
         call costfunction%cfv_ld%Deallocate()
+        call costfunction%cfv_rt%Deallocate()
 
     end subroutine
 
@@ -7552,6 +7893,7 @@ module gdmod_costfunction
         if (costfunction%doLRrad) call costfunction%cfv_lrrad%Deallocate()
         if (costfunction%doCA) call costfunction%cfv_ca%Deallocate()
         if (costfunction%doLD) call costfunction%cfv_ld%Deallocate()
+        if (costfunction%doRT) call costfunction%cfv_rt%Deallocate()
 
     end subroutine
     
