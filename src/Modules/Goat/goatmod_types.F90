@@ -593,7 +593,7 @@ module goatmod_types
         !               unless otherwise specified. 
 
         ! Coordinates
-        integer(I8)                         :: np = 0
+        integer(I8)                         :: np
         real(R8), allocatable               :: x(:), y(:)
 
         ! Logicals
@@ -5477,6 +5477,30 @@ module goatmod_types
     
     end subroutine
 
+    ! Writers
+    subroutine WriteVesselPolygon(vessel, filename)
+
+        ! Description
+        !============
+        ! This routine writes out the vessel polygon (set) in 
+        ! structure.dat format.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)            :: vessel 
+        character(*), intent(in)    :: filename
+
+        ! Auxiliary
+        type(VesselStructureUDT), allocatable, dimension(:)     :: structures
+
+        ! Convert to structures
+        !======================
+        call GetStructuresFromPolygonset(vessel%polygonset, structures)
+        call WriteStructureFile(filename, structures)
+
+    end subroutine
+
     ! Data addition
     subroutine ExtractVesselData(vessel, vesseloptions)
 
@@ -8397,6 +8421,50 @@ module goatmod_types
         ! Housekeeping
         end associate
 
+    end subroutine
+
+    ! Structures from polygonset
+    subroutine GetStructuresFromPolygonset(polygonset, structures)
+
+        ! Description
+        !============
+        ! Simple routine that converts each polygon of a polygon set
+        ! to a structure datatype. Useful to write out polygonset data
+        ! in structure.dat format for plotting. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(PolygonSetUDT), intent(in)        :: polygonset 
+        type(VesselStructureUDT), allocatable, intent(out)  :: structures(:)
+
+        ! Auxiliary
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Allocate
+        allocate(structures(polygonset%np))
+
+        ! Construct structures
+        !=====================
+        do i = 1, polygonset%np
+            ! Associate for ease
+            associate(pol => polygonset%polygons(i))
+
+            ! Construct structure
+            structures(i)%np = pol%ne+1
+            structures(i)%x = pol%x(pol%vert)
+            structures(i)%y = pol%y(pol%vert)
+            structures(i)%isclosed = pol%isclosed
+            structures(i)%ID = int(i, kind=I4)
+            structures(i)%label = 0
+            
+            ! Housekeeping
+            end associate
+        end do 
     end subroutine
 
 end module
