@@ -662,6 +662,13 @@ module goatmod_types
         ! - structures : nstructures-by-1 array of structures
         ! - targetpolygons:     closed polygon representation of each 
         !                       vessel target plate
+        ! - plfvessel:  polygon levelset representation of the closed 
+        !               vessel polygon (arbitrary method of approximation)
+        ! - exactplfvessel: exact representation of the closed vessel 
+        !                   polygon, possibly with refinement of this polygon
+        !                   (<...>_noref is the same, but with no refinement, so 
+        !                   vertices are original structure polygon vertices except 
+        !                   at intersections of structures)
 
         ! Target plates
         integer(I4)                         :: ntp = 0
@@ -678,7 +685,8 @@ module goatmod_types
         class(PolygonShapeFunctionUDT), allocatable     :: psf
         class(PolygonLevelsetFunction2DUDT), allocatable   :: plfvessel, &
             plftarget
-        type(PolygonLevelsetFunction2DClosedExactUDT)   :: exactplfvessel
+        type(PolygonLevelsetFunction2DClosedExactUDT)   :: exactplfvessel, &
+            exactplfvessel_noref
 
     contains 
 
@@ -5473,7 +5481,7 @@ module goatmod_types
         integer(I8)                         :: i, j, k, status, ks, ke, pc
     
         ! Auxiliary variables 
-        type(PolygonSetUDT)                 :: tempps 
+        type(PolygonSetUDT)                 :: tempps, polygonset_noref
         type(PolygonUDT)                    :: temppol
         integer(I8)                         :: nvp, cc, nexcl, nTP, tne, &
             vID, tl, flag
@@ -5558,6 +5566,9 @@ module goatmod_types
     
         ! Construct vessel polygon set 
         call ConstructVesselPolygonSet(vessel, tempps)
+
+        ! Store the original, non-refined set
+        polygonset_noref = vessel%polygonset
     
         ! Refine vessel polygonset
         !=========================
@@ -5744,10 +5755,26 @@ module goatmod_types
             ! Housekeeping
             end associate 
         end do
+        do i = 1, polygonset_noref%np 
+            ! Initialize
+            associate(tp    => polygonset_noref%polygons(i)) 
+    
+            ! Remap if nonzero
+            where (tp%labels(:, 1) /= 0) tp%labels(:, 1) = vesselIDmap(tp%labels(:, 1))
+            where (tp%labels(:, 2) /= 0) tp%labels(:, 2) = vesselIDmap(tp%labels(:, 2))
+    
+            ! Add vertex IDs 
+            do j = 1, tp%nv
+                if (tp%labels(j, 3) == 0) then 
+                    vID = vID + 1
+                    tp%labels(j, 3) = vID 
+                end if 
+            end do 
+    
+            ! Housekeeping
+            end associate 
+        end do
 
-        
-    
-    
         ! Target polygon representation
         !==============================
         ! Check how many targets there are
@@ -5895,6 +5922,7 @@ module goatmod_types
         call InitializePolygonLevelsetFunction2D(vessel%plfvessel, vessel%polygonset, plfoptions)
         call InitializePolygonLevelsetFunction2D(vessel%plftarget, vessel%targetps, plfoptions)
         call vessel%exactplfvessel%Initialize(vessel%polygonset)
+        call vessel%exactplfvessel_noref%Initialize(polygonset_noref)
 
         ! Write
         call vessel%exactplfvessel%VisualizeLabel('levelset_label_1', labelindin=1)
