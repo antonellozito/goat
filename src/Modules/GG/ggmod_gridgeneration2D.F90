@@ -120,7 +120,8 @@ module ggmod_gridgeneration2D
     implicit none
     private 
     public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels, &
-        ComputeTopologicalData, GetGridFaceLabelMappingGD
+        ComputeTopologicalData, GetGridFaceLabelMappingGD, &
+        ComputeVoidRegionPolygonSet, WriteVoidRegionFile
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -17516,6 +17517,359 @@ module ggmod_gridgeneration2D
             spread(interiorID, 1, size(interiorIDs))]
         
 
+    end subroutine
+
+    ! Void region computation
+    subroutine ComputeVoidRegionPolygonSet(simgrid, topomesh, vessel, &
+        voidps)
+
+        ! Description
+        !============
+        ! This routine computes the void region polygon set that 
+        ! encompasses the domain that is not gridded yet which does 
+        ! lie inside of the vessel. The idea is that this polygon set
+        ! is used to determine the fort.78 file that is required by 
+        ! EIRENE. The output polygonset has labels for each vertex 
+        ! based on which one can determine which edges may be refined
+        ! and which not. 
+
+        ! Algorithm
+        !==========
+        ! 1)    Determine the topomesh vertices that are both on an aligned and vessel
+        !       boundary (these form the 'corners' of the domain)
+        ! 2)    Determine on which vessel edges these vertices lie and 
+        !       split these edges
+        ! 3)    Add all vessel edges to the void edges
+        ! 4)    Check which edges are covered by topological mesh 
+        !       boundary faces by checking on which vessel edges the
+        !       topomesh face polygon vertices lie. If the closed exact
+        !       approximation was used, these points should either lie
+        !       precisely on vessel points, or on faces. To ensure all
+        !       edges are found, we refine the original polygon by 
+        !       dividing each edge in two. 
+        ! 5)    Build the void polygon set
+
+        ! Note: to use the polygon set constructor, we need to keep 
+        ! track of the edge vertices. Since we mix both vessel and grid
+        ! vertices, we need to ensure proper numbering! Here, we append
+        ! the vessel polygon vertices to the grid vertices, so the local
+        ! vessel polygon vertex IDs need to be updated by adding grid%vert%ntot
+
+        ! Modules
+        !========
+        use mod_definitions, only: TMfacealignedID, TMfacecoreID, &
+            TMfacealbndID
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GridUDT), intent(in)           :: simgrid 
+        type(TopomeshUDT), intent(in)       :: topomesh
+        type(VesselUDT), intent(in)         :: vessel
+        type(PolygonSetUDT), intent(out)    :: voidps
+
+        ! Auxiliary
+        integer(I8)                                 :: tedgeID
+        integer(I8), allocatable, dimension(:)      :: edgeID, vertID, &
+            splitvertID, uedgeID, sortind, allvert, &
+            voidedgevID1, voidedgevID2, vesseledgeID1, vesseledgeID2, &
+            vertindex
+        integer(I8), allocatable, dimension(:, :)   :: labels, &
+            voidedgevID
+        logical, allocatable, dimension(:)          :: isalbndface, &
+            isvesselface, isalignedvert, isvesselvert, &
+            istp, isvoidedge, issplitvesseledge, allistp, &
+            issplitvert
+        real(R8), allocatable, dimension(:)         :: alldist
+        type(PolygonUDT)                            :: tpol 
+        type(PolygonSetUDT)                         :: tempvoidps
+        type(PolygonLevelsetFunction2DClosedExactUDT)   :: tempvoidplf
+
+        ! Loop
+        integer(I8)                         :: i, k 
+    
+        ! Initialize
+        !===========
+        ! Unpack 
+        associate(&
+            plfv    => vessel%exactplfvessel_noref,   & ! make sure we use the original polygon edges!
+            vert    => simgrid%vert,            &
+            face    => simgrid%face             &         
+            )
+
+        ! Initialize void edges
+        allocate(voidedgevID1(0), voidedgevID2(0))
+
+        ! Initialize vessel edges
+        vesseledgeID1 = plfv%vp1 + vert%ntot
+        vesseledgeID2 = plfv%vp2 + vert%ntot
+
+        ! Determine void grid faces
+        !==========================
+        ! Get all grid faces that are part of an aligned non-vessel 
+        ! boundary
+        allocate(isalbndface(face%ntot))
+        isalbndface = .false. 
+        do i = 1, size(TMfacealignedID)
+            ! Skip core and aligned boundary faces
+            if (any(TMfacealignedID(i) == [TMfacecoreID, TMfacealbndID])) then 
+                cycle
+            end if 
+
+            ! Set to true
+            where (face%TMfacelabel /= 0) isalbndface = isalbndface .or. &
+                (topomesh%face%type(face%TMfacelabel) == TMfacealignedID(i))
+        end do 
+
+        ! Take only boundary faces
+        isalbndface = isalbndface .and. face%BF 
+
+        ! Get all grid faces that lie on the vessel
+        isvesselface = face%BF 
+        where (face%TMfacelabel /= 0) isvesselface = (topomesh%face%type(face%TMfacelabel) == TMfacealbndID) .or. &
+            (topomesh%face%type(face%TMfacelabel) == TMfacebndID)
+
+        ! Split vessel edges
+        !===================
+        ! Determine grid vertex IDs that may lead to a split:
+        ! - vertices that are part of both a vessel and aligned boundary face
+        ! - vertices that are type 2 tangency points 
+        allocate(isalignedvert(vert%ntot), isvesselvert(vert%ntot))
+        isalignedvert = .false. 
+        isvesselvert = .false.
+        do i = 1, face%ntot
+            if (isalbndface(i)) then 
+                isalignedvert(face%vert(i, :)) = .true.
+            end if 
+            if (isvesselface(i)) then 
+                isvesselvert(face%vert(i, :)) = .true. 
+            end if 
+        end do  
+        istp = topomesh%vert%type == TMvertextp2ID
+        call Unique([pack([(k, k = 1, vert%ntot)], isalignedvert .and. isvesselvert), &
+            pack([(k, k = 1, topomesh%vert%ntot)], istp)], splitvertID)
+        allocate(issplitvert(topomesh%vert%ntot))
+        issplitvert = .false. 
+        issplitvert(splitvertID) = .true. 
+
+        ! Mark tangency points for later
+        deallocate(istp) 
+        allocate(istp(size(splitvertID)))
+        istp = .false. 
+        where (splitvertID <= topomesh%vert%ntot) istp = topomesh%vert%type(splitvertID) == TMvertextp2ID
+
+        ! Determine the vessel edges on which these vertices lie
+        allocate(issplitvesseledge(size(plfv%xp1)), isvoidedge(size(plfv%xp1)))
+        issplitvesseledge = .false. 
+        call plfv%EvaluateLabel(vert%x(splitvertID), vert%y(splitvertID), &
+            labels, edgeIDopt=edgeID, vertIDopt=vertID)
+
+        ! If any vertices lie exactly on a vessel vertex, we need to 
+        ! adjust its ID so that polygons are correctly nested
+        do i = 1, size(splitvertID)
+            where (plfv%xp1 == topomesh%vert%x(splitvertID(i)) .and. &
+                plfv%yp1 == topomesh%vert%y(splitvertID(i))) 
+                vesseledgeID1 = splitvertID(i)
+            end where
+            where (plfv%xp2 == topomesh%vert%x(splitvertID(i)) .and. &
+                plfv%yp2 == topomesh%vert%y(splitvertID(i))) 
+                vesseledgeID2 = splitvertID(i)
+            end where
+            if (any((vesseledgeID1 == splitvertID(i)) .or. (vesseledgeID2 == splitvertID(i)))) then 
+                edgeID(i) = 0 ! don't split edge at this vertex
+            end if 
+        end do 
+
+        ! Remove these edges as void edges as they need to be split
+        call Unique(edgeID, uedgeID)
+        uedgeID = pack(uedgeID, uedgeID /= 0)
+        isvoidedge = .true. 
+        isvoidedge(uedgeID) = .false.
+
+        ! Loop over all edges that need to be split
+        do i = 1, size(uedgeID)
+            ! Get current edge
+            tedgeID = uedgeID(i)
+
+            ! Determine all vertices that lie on this edge
+            allocate(allvert(count(edgeID == tedgeID)))
+            allvert = pack(splitvertID, edgeID == tedgeID)
+            allistp = pack(istp, edgeID == tedgeID)
+
+            ! Determine the (squared) distance w.r.t. the first vertex of this 
+            ! edge 
+            alldist =  (vert%x(allvert) - plfv%xp1(tedgeID))**2 + &
+                (vert%y(allvert) - plfv%yp1(tedgeID))**2
+
+            ! Sort
+            allocate(sortind(size(alldist)))
+            call Sort(alldist, ind=sortind, ascend=.true.)
+            allvert = allvert(sortind)
+            allistp = allistp(sortind)
+
+            ! Add all as (preliminary) void edges
+            voidedgevID1 = [voidedgevID1, [vesseledgeID1(tedgeID), allvert]] 
+            voidedgevID2 = [voidedgevID2, [allvert, vesseledgeID2(tedgeID)]] 
+
+            ! Housekeeping
+            deallocate(allvert, sortind)
+        end do 
+
+        ! Determine void polygon set
+        !===========================
+        ! Add all vessel edges except splitted edges to void edges for now
+        voidedgevID1 = [voidedgevID1, pack(vesseledgeID1, isvoidedge)]
+        voidedgevID2 = [voidedgevID2, pack(vesseledgeID2, isvoidedge)]
+        allocate(voidedgevID(size(voidedgevID1), 2))
+        voidedgevID(:, 1) = voidedgevID1
+        voidedgevID(:, 2) = voidedgevID2 
+
+        ! Construct temporary polygon set and plf
+        call tempvoidps%Construct(voidedgevID, [vert%x, plfv%xp], [vert%y, plfv%yp])
+        call tempvoidplf%Initialize(tempvoidps)
+
+        ! Check which edges are covered by topomesh vessel boundaries
+        deallocate(isvoidedge)
+        allocate(isvoidedge(size(tempvoidplf%xp1)))
+        isvoidedge = .true. 
+        do i = 1, topomesh%face%ntot
+            ! Skip non-vessel boundaries
+            if (.not. any(topomesh%face%type(i) == [TMfacealbndID, TMfacebndID])) then 
+                cycle 
+            end if 
+
+            ! Take the polygon and refine
+            tpol = topomesh%face%pol(i)
+            call tpol%Refine(0.0_R8, 1)
+
+            ! Evaluate (skip end points if they are corner vertices!)
+            vertindex = tpol%vert 
+            if (issplitvert(topomesh%face%vert(i, 1))) then 
+                vertindex = vertindex(2:)
+            end if 
+            if (issplitvert(topomesh%face%vert(i, 2))) then 
+                vertindex = vertindex(1:size(vertindex)-1)
+            end if 
+            call tempvoidplf%EvaluateLabel(tpol%x(vertindex), tpol%y(vertindex), labels, &
+                edgeIDopt=edgeID)
+
+            ! Set edges to false
+            where (edgeID /= 0) isvoidedge(edgeID) = .false. 
+        end do
+
+        ! Construct the actual polygon set - note: we need to use the 
+        ! labels to get the correct vertex IDs here
+        voidedgevID1 = [tempvoidplf%vertlabel(pack(tempvoidplf%vp1, isvoidedge), 1), & 
+            pack(face%vert(:, 1), isalbndface)]
+        voidedgevID2 = [tempvoidplf%vertlabel(pack(tempvoidplf%vp2, isvoidedge), 1), &
+            pack(face%vert(:, 2), isalbndface)]
+        deallocate(voidedgevID)
+        allocate(voidedgevID(size(voidedgevID1), 2))
+        voidedgevID(:, 1) = voidedgevID1
+        voidedgevID(:, 2) = voidedgevID2 
+        call voidps%Construct(voidedgevID, [vert%x, plfv%xp], [vert%y, plfv%yp])
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Void region file writing
+    subroutine WriteVoidRegionFile(voidps, grid, filename)
+
+        ! Description
+        !============
+        ! This routine writes the void polygon to a file with given 
+        ! filename. The void polygon should be computed beforehand using 
+        ! the 'ComputeVoidRegionPolygonset' routine. Its vertex labels 
+        ! should indicate whether it is a grid vertex (value smaller or
+        ! equal to number of grid vertices) or a vessel vertex (value
+        ! larger than number of grid vertices). The file format is 
+        ! the same as the fort.78 file format used in SOLPS (because 
+        ! this is also the only application of this routine):
+        ! 0.0
+        ! 
+        ! [# polygon vertices]
+        ! [x, y, isvesselvertex]
+        ! 
+        ! Note: coordinate units are in cm!
+
+        ! Declare modules
+        !================
+        use mod_std_formatspecs
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(PolygonSetUDT), intent(in)         :: voidps 
+        type(GridUDT), intent(in)               :: grid 
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer(I8)                             :: isvesselvertex, fu
+        character(:), allocatable               :: fmt
+
+        ! Loop
+        integer(I8)                             :: i, j
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(pol => voidps%polygons)
+
+        ! Do checks
+        do i = 1, voidps%np 
+            if (.not. pol(i)%isclosed) then 
+                ! Normally, all void polygons should be closed - but perhaps
+                ! there exist polygons that touch in a tangency point, which
+                ! is currently not hedged for. 
+                call voidps%WriteData('voidpolygon_error')
+                call gdErrorHandler('WriteVoidRegionFile: void polygon is ' // & 
+                    'not closed, unexpected. Error output is written to ' // & 
+                    'voidpolygon_error.dat')
+            end if 
+        end do 
+
+        ! Open file 
+        open (action='write', file=trim(filename), newunit=fu, &
+            status='unknown')
+            
+        ! Write
+        !======
+        ! Header
+        fmt = '('//Rfm//')'
+        write(fu, fmt) 0.0_R8 
+        
+        ! Blank line
+        write(fu, *) 
+
+        ! Polygons
+        do i = 1, voidps%np
+            ! Number of points
+            fmt = '('//Ifm//')'
+            write(fu, fmt) size(pol(i)%vert)
+
+            ! Points (in cm!)
+            fmt = '('//Rfm//','//spacefm//','//Rfm//','//spacefm//','//Ifm//')'
+            do j = 1, size(pol(i)%vert)
+                ! Check if vertex is vessel vertex
+                if (pol(i)%labels(pol(i)%vert(j), 1) > grid%vert%ntot) then 
+                    isvesselvertex = 1
+                else
+                    isvesselvertex = 0
+                end if 
+
+                ! Write
+                write(fu, fmt) pol(i)%x(pol(i)%vert(j))*100.0_R8, &
+                    pol(i)%y(pol(i)%vert(j))*100.0_R8, isvesselvertex
+            end do 
+        end do 
+
+        ! Housekeeping
+        !=============
+        close(fu)
+        end associate 
     end subroutine
 
     !------------------------------------------------------------------!

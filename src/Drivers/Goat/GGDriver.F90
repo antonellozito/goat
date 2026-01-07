@@ -38,6 +38,7 @@ subroutine GGDriver(goatoptions)
     type(TopomeshUDT)           :: topomesh
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
+    type(PolygonSetUDT)         :: voidps
 
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
         yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
@@ -138,6 +139,11 @@ subroutine GGDriver(goatoptions)
 
     ! Grid data
     call WriteGOAT(goatoptions, grid, magneticField, environment)
+
+    ! Fort.78 file with void regions
+    call ComputeVoidRegionPolygonSet(grid, topomesh, environment%vessel, &
+        voidps)
+    call WriteVoidRegionFile(voidps, grid, 'fort.78')
 
     ! b2ag file
     !call Writeb2agdat(goatoptions, grid)
