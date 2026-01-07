@@ -59,7 +59,10 @@ class Structure:
         self.x = np.zeros(0, dtype=float)
         self.y = np.zeros(0, dtype=float)
 
-    def Initialize(self, ntot, x, y):
+        # ID
+        self.ID = 0
+
+    def Initialize(self, ntot, x, y, ID):
         assert ntot == len(x)
         assert ntot == len(y)
         self.n = -ntot 
@@ -67,6 +70,7 @@ class Structure:
             self.n =  ntot 
         self.x = x 
         self.y = y
+        self.ID = ID
 
 #----------------------------------------------------------------------#
 #                        TOPOLOGICAL MESH                              #

@@ -659,6 +659,16 @@ def PlotBoundaryConstraintVertices(dirpath, fignum):
     thisaxes.set_ylabel('y [m]')
     thisaxes.legend(loc='upper right')
 
+def PlotBoundaryConstraintPLF(dirpath, fignum):
+    # Description
+    #------------
+    # Plot the polygon levelset function of the boundary constraints
+    # Set the filepaths
+    datafilepath = dirpath + filesep + bndconPLFfile
+
+    # Plot 
+    Plot2DSurfaceDataContourf(datafilepath, fignum, levels=25)
+
 def PlotXPointConstraintVertices(dirpath, fignum):
     # Description
     #------------
@@ -1781,7 +1791,7 @@ def PlotStructure(structure, fignum, **plotargs):
     maxy = -np.inf
     cc = 1
     for i in structure:
-        PlotPolygons2D(i.x, i.y, fignum, **plotargs, label='structure ' + str(cc))
+        PlotPolygons2D(i.x, i.y, fignum, **plotargs, label='structure ' + str(i.ID))
         ID = np.arange(1, len(i.x)+1, 1) 
         PlotPoints2DWithID(i.x, i.y, ID, fignum, **plotargs)
         minx = np.min([minx, np.min(i.x)])

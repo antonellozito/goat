@@ -2213,7 +2213,7 @@ def ReadStructureFile(filepath):
     for i in np.arange(0, ns, 1):
         # Read structure header to get the structure ID
         values = alllines[lind].split()
-        sID = np.fromstring(values[1], dtype=int, count=1, sep =' '); sID = sID[0]-1
+        sID = np.fromstring(values[1], dtype=int, count=1, sep =' '); sID = sID[0]
 
         # Update line index
         lind = lind + 1
@@ -2238,7 +2238,7 @@ def ReadStructureFile(filepath):
             lind = lind + 1
         
         # Make structure
-        structure[sID].Initialize(abs(nc), tx, ty)
+        structure[i].Initialize(abs(nc), tx, ty, sID)
 
     # Return
     return structure
@@ -2873,4 +2873,45 @@ def WriteSOLPSField(filehandle, vals, fieldname, fieldtype):
     else:
         raise Exception("WriteSOLPSField: unknown data format: " + fieldtype)
 
+# Read fort.78 file
+def ReadFort78File(filepath):
+    # Description
+    #------------
+    # This routine reads a formatted fort.78 file where the polygon
+    # coordinates (2D) are stored as [x, y] columns and are prepended
+    # with the amount of points. Polygons in output are separated by
+    # NaNs
 
+    # Note: original values are in cm but are converted to m here!
+
+    # Read in vertex coordinates from the vertices.dat file
+    thisfile = open(filepath)
+
+    alllines = thisfile.readlines()
+
+    # Remove header
+    del alllines[0:1]
+    vals = np.zeros([len(alllines), 2])
+
+    # Read in vertex data
+    cc = 0
+    for i in alllines:
+        # Read in values
+        temp = np.fromstring(i, dtype=float, count=-1, sep=' ')
+
+        # Check the size
+        if len(temp) != 3:
+            # Insert NaN
+            vals[cc, :] = np.NaN
+        else:
+            # Read
+            vals[cc, 0:2] = np.fromstring(i, dtype=float, count=2, sep=' ')
+
+        # Update counter
+        cc = cc + 1
+
+    # Change units from cm to m
+    vals = vals/100.0
+
+    # Return values
+    return vals[0:cc, 0:2]
