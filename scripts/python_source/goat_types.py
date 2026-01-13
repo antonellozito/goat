@@ -732,6 +732,74 @@ class GAGrid:
         self.cell = GACell()
 
 #----------------------------------------------------------------------#
+#                         TRIANGULATION                                #
+#----------------------------------------------------------------------#
+# triangulation vert
+class TriaVert:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        nv = self.ntot
+
+        # coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nv, dtype=int)
+
+
+    # Initializer
+    def Initialize(self, nv):
+        # Number
+        self.ntot = nv 
+
+        # Coordinates
+        self.x = np.zeros(nv, dtype=float)
+        self.y = np.zeros(nv, dtype=float)
+
+        # ID
+        self.ID =  np.zeros(nv, dtype=int)
+
+# triangulation cell        
+class TriaCell:
+    # Definition
+    def __init__(self):
+        # Number
+        self.ntot = 0
+        self.nvert = 0
+        nc = self.ntot
+
+        # cvert
+        shape = (nc, 3)
+        self.vert = np.zeros(shape, dtype=int)
+
+        # ID
+        self.ID = np.zeros(nc, dtype=int)
+
+    # Initializer
+    def Initialize(self, nc):
+         # Number
+        self.ntot = nc
+        self.nvert = nc*3
+
+        # vert
+        shape = (nc, 3)
+        self.vert = np.zeros(shape, dtype=int)
+
+        # ID
+        self.ID = np.zeros(nc, dtype=int)   
+
+class TriaGrid:
+    # Init
+    def __init__(self):
+        # Fields
+        self.vert = TriaVert()
+        self.cell = TriaCell()        
+
+
+#----------------------------------------------------------------------#
 #                        SIMULATION GRID                               #
 #----------------------------------------------------------------------#
         

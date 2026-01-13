@@ -1271,7 +1271,7 @@ def ReadGARealArrayFile(filepath):
 def ReadGAGridDataFile(filepath):
     # Description
     #------------
-    # This routine reads in the grid data from an intermediate grid 
+    # This routine reads in the grid data from an 
     # adaptation grid object. This is not the same as the full grid
     # that is used in the grid deformation module.
 
@@ -2280,6 +2280,112 @@ def WriteStructureFile(dirpath, structure):
 
     # Close the file
     thisfile.close()
+
+def ReadTriaGrid(filepath):
+    # Description
+    #------------
+    # This routine reads in the triangulation grid data writen by 
+    # the subroutine VisualizeTriangulation
+
+    tria = gt.TriaGrid()
+
+    # Open file
+    thisfile = open(filepath)
+
+    # Read lines
+    alllines = thisfile.readlines() 
+
+    # Read vertex data
+    #-----------------
+    i = 0
+    while i < len(alllines):
+        if "vertices" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1
+
+    # Read number of vertices
+    values = alllines[i].split()
+    nv = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nv = nv[0]
+
+    # Initialize vertex structure
+    tria.vert.Initialize(nv)
+
+    # Read vertex data
+    while i < len(alllines):
+        if "ID, x, y" in alllines[i]:
+            break 
+        else: 
+            i = i + 1  
+
+    # Skip header
+    i = i + 1
+
+    # Start reading
+    for j in np.arange(0, nv):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        x = np.fromstring(values[1], dtype=float, count=1, sep =' ')
+        y = np.fromstring(values[2], dtype=float, count=1, sep =' ')
+        tria.vert.ID[ID-1] = ID
+        tria.vert.x[ID-1] = x[0]
+        tria.vert.y[ID-1] = y[0] 
+        if x[0] == -1:
+            print('value of -1 found at')
+            print(ID)
+
+    # Read in cell data
+    #------------------
+    i = 0
+    while i < len(alllines):
+        if "cells" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1    
+
+    # Read number of cells and cell vertices
+    values = alllines[i].split()
+    nc = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+    nc = nc[0]
+
+    # Initialize vertex structure
+    tria.cell.Initialize(nc)
+
+    # Read cell data
+    while i < len(alllines):
+        if "ID, v1, v2, v3" in alllines[i]:
+            break 
+        else: 
+            i = i + 1
+
+    # Skip header
+    i = i + 1    
+
+    # Start reading
+    for j in np.arange(0, nc):
+        values = alllines[i+j].split()
+        ID = np.fromstring(values[0], dtype=int, count=1, sep =' ')
+        ID = ID[0]
+        v1 = np.fromstring(values[1], dtype=int, count=1, sep =' ')
+        v2 = np.fromstring(values[2], dtype=int, count=1, sep =' ')
+        v3 = np.fromstring(values[3], dtype=int, count=1, sep =' ')
+      
+        tria.cell.ID[ID-1] = ID
+        tria.cell.vert[ID-1, 0] = v1[0] # Need to account for 0-based indexing
+        tria.cell.vert[ID-1, 1] = v2[0]
+        tria.cell.vert[ID-1, 2] = v3[0]
+
+    # Return
+    return tria
+
 
 #--------------------------------------------------------------------------#
 #                           MAGNETIC FIELD                                 #

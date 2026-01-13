@@ -1912,9 +1912,6 @@ contains
         rda%val(1:rda%nel) = pack(rda%val(1:old_size), mask)
         rda%val(rda%nel+1:size(rda%val)) = 0
 
-        ! Maybe shrink the array if size is big difference - TODO
-
-
     end subroutine 
 
     ! Single element getter
@@ -2500,9 +2497,6 @@ contains
         ida%nel = ida%nel - size(loc)
         ida%val(1:ida%nel) = pack(ida%val(1:old_size), mask)
         ida%val(ida%nel+1:size(ida%val)) = 0
-
-        ! Maybe shrink the array if size is big difference - TODO
-
 
     end subroutine 
 

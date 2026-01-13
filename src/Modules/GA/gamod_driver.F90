@@ -13,6 +13,8 @@ module gamod_driver
     ! Initialize
     !============
     ! Load modules
+    use mod_triangulation
+    use UnstructuredInterpolant2D
     use goatmod_types
     use goatmod_userinput
     use gamod_utility
@@ -31,7 +33,7 @@ module gamod_driver
     
     contains
 
-    subroutine GridAdaptor(grid,environment,magneticField,options)
+    subroutine GridAdaptor(grid, environment, magneticField, options)
 
         ! Description
         !============
@@ -52,7 +54,7 @@ module gamod_driver
 
         ! Initialize grid adaptation
         !===========================
-        call GAinit(grid,options,environment,magneticField)
+        call GAinit(grid, options, environment, magneticField)
         
 
         ! Driver Selection
@@ -67,7 +69,7 @@ module gamod_driver
         case ('aposteriori')
 
             ! Grid adaptation based on simulation information
-            !call GAapostDriver(grid, options, environment, magneticField, state) 
+            call GAapostDriver(grid, options, environment, magneticField) 
 
         case default
 
@@ -78,7 +80,7 @@ module gamod_driver
 
         ! Postprocessing
         !===============
-        call PostProcessGA(grid,magneticField,options)
+        call PostProcessGA(grid, magneticField, options)
 
     end subroutine
 
@@ -97,9 +99,9 @@ module gamod_driver
 
         ! Variables
         integer(I8) :: i
-        integer(I8), allocatable, dimension(:) :: tv, cvLookUp
+        integer(I8), allocatable, dimension(:) :: tv, cvLookUp, indcv
         logical :: cells(grid%cell%ntot), is_ordered(grid%cell%ntot), &
-            use_nsep, use_sepID, start
+            use_nsep, use_sepID, start, b_flag(grid%face%ntot)
         character(:), allocatable :: base_func
 
 
@@ -110,16 +112,22 @@ module gamod_driver
             c  => grid%cell, &
             v  => grid%vert &
             )
+
         ! Recompute cell centers
         do i = 1, c%ntot
             ! Get cell vertices
             tv = GetCellVertGA(c, i)
 
             ! Compute coordinates
-            call c%x%SetSingleElement(i,sum(v%x%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
-            call c%y%SetSingleElement(i,sum(v%y%GetMultipleElements(tv))/real(size(tv), kind=R8)) 
+            call c%x%SetSingleElement(i,sum(v%x%Get(tv))/real(size(tv), kind=R8)) 
+            call c%y%SetSingleElement(i,sum(v%y%Get(tv))/real(size(tv), kind=R8)) 
 
         end do
+
+        ! Determine cflags
+        b_flag = [grid%face%label%Get() /= 0]
+        indcv = (/(i, i = 1, c%ntot)/)
+        call grid%DetermineCflags(indcv, b_flag)
 
 
         ! Check order of vertices  (see GetGeo_usCouples.m)
@@ -132,6 +140,9 @@ module gamod_driver
             call grid%ReorderCellConn(is_ordered)
 
         end if 
+
+        ! Check fsFc
+        call grid%CheckFsFc()
 
         ! Get fsVx from fsFc
         call grid%GetFsVxFromFsFc(options)
@@ -182,20 +193,15 @@ module gamod_driver
         ! Correct face labels on for wide grid
         call grid%CheckFcLbl(options)
 
-        ! Detect cells at cut for artificial slabs - TODO
-
         ! Identify farSOL cells
-        if (options%vesselmode .and. maxval(options%facelabelmappingGA) .lt. 6) then
-            call grid%IdentifyfarSOLcells(options)
-        else if (maxval(options%facelabelmappingGA) .gt. 5) then
-            call gdErrorHandler('GAInit: no farSOL indentified as algorithm is not supporting double null cases yet!') ! TODO
-        end if
+        call grid%IdentifyfarSOLcells(options)
 
         ! Check consistency of options
         call CheckGAoptions(options)
 
         ! Visualize starting grid
         call grid%WriteData('grid_before_GA')
+        call grid%WriteFluxSurfaceData()
 
         end associate        
 
@@ -217,8 +223,11 @@ module gamod_driver
         type(MagneticFieldUDT), intent(in)   :: magneticField
 
         ! Auxiliary
+        integer(I8) :: i
         type(QualityMetricUDT) :: qm
         type(GAoptionsUDT) :: options1
+        type(GAoptionsUDT) :: options_merge
+        type(GAoptionsUDT) :: options_split
 
         ! Calculate quality metric
         call qm%Initialize(grid)
@@ -228,9 +237,11 @@ module gamod_driver
         if (options%rem_small_trias) &
             call grid%RemoveSmallTriangle(magneticField, qm, options)
 
+        ! Visualize starting grid
+        call grid%WriteData('grid_after_rem_trias')
 
         ! Remove flux tubes with only two triangles
-        if (options%rem_trias_flux) &
+        if (options%rem_trias_tube .or. options%rem_outershell) &
             call grid%RemTriasFlux(options)
 
         ! Stacked to cutcell
@@ -241,7 +252,7 @@ module gamod_driver
         if (options%split_noalignedquads) then
             options1 = options
             options1%splittype = 'rad'
-            options1%rad_type = 'no_aligned_faces'
+            options1%rad_type = 7 !'no_aligned_faces'
             options1%n_split = grid%cell%ntot
             call grid%DoSplitting(magneticField, qm, options1)
         end if
@@ -250,20 +261,36 @@ module gamod_driver
         if (options%split_shaved_off_tube) then
             options1 = options
             options1%splittype = 'rad'
-            options1%rad_type = 'shaved-off_tubes'
+            options1%rad_type = 8 !'shaved-off_tubes'
             options1%n_split = grid%cell%ntot
             call grid%DoSplitting(magneticField, qm, options1)
         end if
 
         ! Splitting  and merging
         ! Merging
-        if (options%merging) then
-            call grid%DoMerging(magneticField, qm, options)
-        end if
+        do i = 1, size(options%merge_crit_array)
+            if (options%merging_array(i) == 1) then
+                options_merge = options
+                options_merge%merging = .true.
+                options_merge%n_merge = options%n_merge_array(i)
+                options_merge%merge_crit = options%merge_crit_array(i)
+                call grid%DoMerging(magneticField, qm, options_merge)
+            end if
 
-        if (options%splitting) then
-            call grid%DoSplitting(magneticField, qm, options)
-        end if
+            if (options%splitting_array(i) == 1) then
+                options_split = options
+                options_split%splitting = .true.
+                options_split%n_split = options%n_split_array(i)
+                options_split%rad_type = options%rad_type_array(i)
+                options_split%pol_type = options%pol_type_array(i)
+                if (options%splittype_array(i) == 1) then
+                    options_split%splittype = 'rad'
+                else if (options%splittype_array(i) == 2) then
+                    options_split%splittype = 'pol'
+                end if
+                call grid%DoSplitting(magneticField, qm, options_split)
+            end if
+        end do
 
         ! Stacked triangles
         if (options%stacked_trias) &
@@ -274,7 +301,7 @@ module gamod_driver
             call grid%RemoveStickOutTrias(options)
 
         ! Remove boundary flux tubes with only two triangles
-        if (options%rem_trias_flux) &
+        if (options%rem_trias_tube .or. options%rem_outershell) &
             call grid%RemTriasFlux(options)
 
         ! Remove stickout quad
@@ -285,6 +312,132 @@ module gamod_driver
         if (options%BLG) then
             call grid%BoundaryLayerGrid(qm, magneticField, options)
         end if
+
+
+    end subroutine
+
+    subroutine GAapostDriver(grid, options, environment, magneticField)
+
+        ! Description
+        !============
+        ! Internal driver of the grid adaptation for refinement where the computed
+        ! residuals or state gradients are high
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(GAGridUDT), intent(inout)      :: grid
+        type(GAoptionsUDT), intent(inout)   :: options
+        type(EnvironmentUDT), intent(in)    :: environment
+        type(MagneticFieldUDT), intent(in)  :: magneticField
+
+        ! Auxiliary
+        integer(I8) :: j, split_cv
+        type(TriangulationUDT)              :: triangulation
+        type(StateUDT)                      :: state
+        type(StateUDT)                      :: state_v
+        type(StateUDT)                      :: state_int
+        type(UnstructuredInterpolant2DUDT)  :: interp
+        type(QualityMetricUDT)              :: qm
+
+        ! Unpack state
+        state = environment%SOLPSstate
+
+        ! Interpolation
+        !==============
+        ! Triangulate
+        call grid%TriangulateGAGrid(triangulation)
+
+        ! Interpolate state to vertex positions
+        call grid%InterpolateCvToVx(options, state, state_v)
+
+        ! Construct interpolant
+        select case (options%apost_interpolation_meth)
+        case ('barycentric')
+
+            call interp%SetParametersUS(options%apost_interpolation_meth, 0, 1, triangulation, 'polynomial')
+
+        case ('finite_element')
+
+            call interp%SetParametersUS(options%apost_interpolation_meth, &
+                options%apost_interpolationC, options%apost_interpolationM, triangulation, 'polynomial')
+
+        end select
+
+
+
+        ! Convert stacked triangle back to cutcells
+        if (options%stacked_to_cutcell) &
+            call grid%StackedToCutcell(magneticField, options)
+        
+        ! Splitting
+        print *, 'Starting aposteriori splitting'
+
+        ! Select cell to split
+        call grid%SelectSplitCellAposteriori(magneticField, options, interp, state, split_cv)
+        call qm%Initialize(grid)
+
+        ! While a splitting cell is found
+        j = 0
+        do while (split_cv /= 0 .and. j .lt. options%n_split)
+
+            if (options%debug) print *, 'Cell: ', split_cv
+
+            call grid%Splitting(split_cv, options, magneticField)
+
+            if (.not.options%slab) call grid%RecalcMagn(magneticField)
+
+            ! Update counter
+            j = j + 1
+
+            ! Printing 
+            print *, 'Aposteriori splitting: ', j
+
+            ! Check grid
+            if (options%debug) call grid%CheckUnstructuredGrid()
+
+            if (options%splittype == 'rad') then
+
+                ! Remove small triangle which were possibly created
+                ! Calculate quality metric
+                call qm%CalculateQualityMetrics(grid, options, magneticField, .false., .false.)
+
+                ! Remove Small triangles
+                if (options%rem_small_trias) then
+
+                    print *, 'Removing small triangles'
+                    call grid%RemoveSmallTriangle(magneticField, qm, options)
+                    print *, 'Ended removing small triangles'
+
+                    if (options%debug) call grid%CheckUnstructuredGrid()
+
+                end if
+
+            end if
+
+            if (options%apost_meth == 'res') then
+                print *, 'Warning: here should be a routine to reduce the residuals of ' // &
+                ' the splitting cell to avoid resplitting the same cell over and over.' //&
+                ' In this implementation state_v should be changed '// &
+                'as this is the state used to interpolate from.'
+            end if
+
+            ! Interpolant state on new grid (state = state_int)
+            call grid%InterpolateState(interp, state_v, options, state_int)
+
+            ! Select cell to split
+            call grid%SelectSplitCellAposteriori(magneticField, options, interp, state_int, split_cv)
+
+            
+        end do
+
+        ! Transform remaining pentagons into triangles
+        if (options%pents_to_tria) call grid%TransPentsToTrias()
+
+        ! Ordening not necessary probably
+
+        ! Display progress
+        print *, 'Ended aposteriori splitting'
 
 
     end subroutine
@@ -304,12 +457,12 @@ module gamod_driver
 
         ! Auxiliary
         logical :: is_ordered(grid%cell%ntot), cells(grid%cell%ntot), &
-         use_nsep, use_sepID, start
+         use_nsep, use_sepID, start, err
         integer(I8), allocatable :: cvLookUp(:), fcs(:), f_ord(:,:), nf(:), &
-            lbls(:), lbls2(:), fsVx(:)
-        integer(I8) ::  i, iv, nl, nvi, lb, nind, fcReg(grid%face%ntot), &
+            lbls(:), lbls2(:), fsVx(:), verts(:), fcsv(:), ind(:)
+        integer(I8) ::  i, iv, nl, nvi, lb, fcReg(grid%face%ntot), &
             fcLbl_loc(grid%face%ntot), indFc(grid%face%ntot), &
-            ind(grid%face%ntot), nflbl
+            nflbl
         
 
         ! Check consistency
@@ -339,7 +492,7 @@ module gamod_driver
         if (options%stacked_trias .and. .not.options%vesselmode) then
 
             ! Get all vertices belonging to a flux surface
-            fsVx = grid%data%fluxdata%fluxsurfaceverts%GetAllElements()
+            fsVx = grid%data%fluxdata%fluxsurfaceverts%Get()
 
             do iv = 1, grid%vert%ntot
 
@@ -347,11 +500,33 @@ module gamod_driver
 
                 if (nvi /= 1) then
 
-                    ! Give error information
-                    print *, 'Vertex without flux surface: ', iv
-                    print *, grid%vert%x%Get(iv)
-                    print *, grid%vert%y%Get(iv)
-                    call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+                    ! Only allowed when vertex is a boundary vertex and 
+                    ! its boundary faces are not aligned
+                    err = .false.
+
+                    if (.not.isBoundaryVertGA(grid, iv)) then
+
+                        err = .true.
+
+                    else 
+
+                        ! Get faces of vertices
+                        fcsv = GetVertFaceGA(grid%face, iv)
+                        if (count(grid%face%aligned%Get(fcsv) == 1) .gt. 0) err = .true.
+
+                    end if
+
+                    if (err) then
+
+                        ! Give error information
+                        print *, 'Vertex without flux surface: ', iv
+                        print *, grid%vert%x%Get(iv)
+                        print *, grid%vert%y%Get(iv)
+                        verts = [iv, iv]
+                        call grid%WriteErrorData(verts, 1)
+                        call gdErrorHandler('PostprocessGA: vertex does not occur once in fsVx')
+
+                    end if
 
                 end if 
 
@@ -370,11 +545,12 @@ module gamod_driver
         fcLbL_loc = GetfcLblGA(grid%face,options)
 
         call Unique(fcLbl_loc, lbls)
+        allocate(lbls2(count(lbls /= 0)))
         lbls2 = pack(lbls,lbls /= 0)
         nl = size(lbls2)
 
         if (nl .gt. size(options%fcRegmappingGA)) then
-            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 2 divertors)')
+            call gdErrorHandler('PostProcesGA: fcReg mapping not compitable for GA labels,(more than 4 taegets)')
         end if
 
         ! Reset fcReg to zero and apply at the right faces
@@ -382,9 +558,14 @@ module gamod_driver
         indFc = (/ (i, i=1,grid%face%ntot) /)
         do i = 1, nl
             lb = lbls2(i)
-            nind = count(fcLbl_loc == lb)
-            ind(1:nind) = pack(indFc,fcLbl_loc == lb )
-            fcReg(ind(1:nind)) = options%fcRegmappingGA(lb)
+            allocate(ind(count(fcLbl_loc == lb)))
+            ind = pack(indFc,fcLbl_loc == lb )
+            if (lb .lt. 1 .or. lb .gt. size(options%fcRegmappingGA)) then
+                print *, 'Label out of range: ', lb
+                call gdErrorHandler('PostProcessGA: label out of range for fcRegmappingGA, check facelabelmapping')
+            end if
+            fcReg(ind) = options%fcRegmappingGA(lb)
+            deallocate(ind)
         end do
 
         ! Self-check if faces with fcReg label can be chained together
@@ -584,12 +765,17 @@ module gamod_driver
         gaoptions%vesselmode            = goatoptions%vesselmode 
         gaoptions%slab                  = goatoptions%slab
         gaoptions%debug                 = goatoptions%debug 
-        gaoptions%facelabelmappingGG    = goatoptions%GGtoGAfacelabelmappingGG
-        gaoptions%facelabelmappingGA    = goatoptions%GGtoGAfacelabelmappingGA
+        gaoptions%facelabelmappingGG    = goatoptions%facelabelmappingGG
+        gaoptions%facelabelmappingGA    = goatoptions%facelabelmappingGA
+        gaoptions%facelabelmappingGD    = goatoptions%facelabelmappingGD 
+        gaoptions%facelabelsubfrom      = goatoptions%facelabelsubfrom
+        gaoptions%facelabelsubto        = goatoptions%facelabelsubto
         gaoptions%OMP_r                 = goatoptions%OMP_r
         gaoptions%OMP_z                 = goatoptions%OMP_z
         gaoptions%IMP_r                 = goatoptions%IMP_r
         gaoptions%IMP_z                 = goatoptions%IMP_z
+        gaoptions%readstate             = goatoptions%readstate
+        gaoptions%readstatemeth         = goatoptions%readstatemeth
 
     end subroutine
 
@@ -604,18 +790,39 @@ module gamod_driver
         ! Arguments
         type(GAoptionsUDT), intent(inout) :: options
 
+        ! Auxiliary
+        integer(I8) :: nl
+
         ! BLG, first remove small triangles
         if (options%BLG) &
             options%rem_small_trias = .true.
         
         ! Pol flux
-        if (options%rad_type == 'pol_flux' &
+        if (options%rad_type == 3 &
             .and. options%splitting .and. .not.options%dist_function) then
             options%dist_function = .true.
             print *, 'Using pol_flux method for radial splitting while GAoptions.' // &
                 & 'dist_function is off. Setting this to 1.'
             print *, 'options%dist_function: T'
         end if
+
+        ! Make sure split and merge arrays are the same size
+        nl = size(options%merging_array)
+        if ( nl /= size(options%splitting_array) &
+            .or. nl /= size(options%n_split_array) &
+            .or. nl /= size(options%rad_type_array) &
+            .or. nl /= size(options%pol_type_array) &
+            .or. nl /= size(options%merge_crit_array) &
+            .or. nl /= size(options%n_merge_array)) then
+                call gdErrorHandler('CheckGAoptions: make sure that ga.splitting, ' // &
+                & 'ga.merging, ga.n_split, ga.rad_type, ga.pol_type, ga.merge_crit, ga.n_merge')
+        end if
+
+        ! Aposteriori
+        if (options%meth == 'aposteriori' .and. .not.options%readstate) then
+            call gdErrorHandler('CheckGAoptions: to do aposteriori GA, a state need to read in')
+        end if
+
 
     end subroutine
 

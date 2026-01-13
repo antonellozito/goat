@@ -47,14 +47,14 @@ subroutine GADriver(goatoptions)
 
     ! Run adaptations
     !================
-    call GridAdaptor(GAgrid,environment,magneticField,gaoptions)
+    call GridAdaptor(GAgrid, environment, magneticField, gaoptions)
 
     ! Translate GAGrid to Grid
-    call TranslateGAGridTOGrid(grid,GAgrid,gaoptions)
+    call TranslateGAGridTOGrid(grid, GAgrid, gaoptions)
 
     ! Post-processing
     !================
-    call PostProcessingGridInformation(grid,magneticField,gaoptions)
+    call PostProcessingGridInformation(grid, magneticField, gaoptions)
 
     ! Write data
     !===========

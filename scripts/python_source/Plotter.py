@@ -1311,8 +1311,8 @@ def PlotGridCells(grid, fignum):
 
 # Grid generation data plotting: cells and indicated aligned faces
 def PlotGridCellsAlignedFaces(grid, fignum):
-    # Plot cells only
-    PlotGridCells(grid, fignum)
+    # Plot faces only
+    PlotGridFaces(grid, fignum)
 
     # Plot vertexID
     #for i in np.arange(0, grid.vert.ntot, 1):
@@ -1326,10 +1326,22 @@ def PlotGridCellsAlignedFaces(grid, fignum):
         if (grid.face.aligned[i] == 1) :
             PlotPoints2D(xf[i], yf[i], fignum, marker='.', color='b')
 
+    # Plot cells without aligned faces
+    #for i in np.arange(0, grid.cell.ntot, 1):
+    #    s = grid.cell.faceP1[i]-1
+    #    n = grid.cell.faceP2[i]
+    #    if (n == 1) :
+    #        cells = grid.cell.face[s]
+    #    else: 
+    #        cells = grid.cell.face[s:s+n]
+    #    if all(j == 0 for j in grid.face.aligned[fcs]):
+    #       PlotPoints2D(grid.cell.x[i], grid.cell.y[i], fignum, marker='.', color='g') 
+
+
 # Grid generation data plotting: cells and indicated boundary faces
 def PlotGridCellsBoundaryFaces(grid, fignum):
-    # Plot cells only
-    PlotGridCells(grid, fignum)
+    # Plot faces only
+    PlotGridFaces(grid, fignum)
 
     # Plot vertexID
     #for i in np.arange(0, grid.vert.ntot, 1):
@@ -1360,6 +1372,38 @@ def PlotGridCellCutcells(grid,cctria,cctrapsP1,cctrapsP2,cctraps, fignum ):
             cells = cctraps[s:s+n]
         PlotPoints2D(grid.cell.x[cells-1], grid.cell.y[cells-1], fignum, marker='.', color='g')
 
+def PlotGridCellsFsFc(grid, fsFc, fsFcP1, fsFcP2, fignum):
+    # Plot cells only
+    PlotGridFaces(grid, fignum)
+
+    # Plot cutcells
+    xf = 0.5*(grid.vert.x[grid.face.v1-1] + grid.vert.x[grid.face.v2-1])
+    yf = 0.5*(grid.vert.y[grid.face.v1-1] + grid.vert.y[grid.face.v2-1]) 
+    for i in np.arange(0,len(fsFcP1), 1):
+        s = fsFcP1[i]-1
+        n = fsFcP2[i]
+        if (n == 1) :
+            faces = fsFc[s]
+        else: 
+            faces = fsFc[s:s+n]
+        PlotPoints2D(xf[faces-1], yf[faces-1], fignum, marker='.', color='g')    
+
+def PlotGridCellsFtCv(grid, ftcv, ftcvP1, ftcvP2, fignum):
+    # Plot cells only
+    PlotGridFaces(grid, fignum)
+
+    # Plot cutcells 
+    color_array = ['g', 'b', 'r', 'b']
+    for i in np.arange(0,len(ftcvP1), 1):
+        t = i % 4
+        s = ftcvP1[i]-1
+        n = ftcvP2[i]
+        if (n == 1) :
+            cells = ftcv[s]
+        else: 
+            cells = ftcv[s:s+n]
+        PlotPoints2D(grid.cell.x[cells-1], grid.cell.y[cells-1], fignum, marker='.', color=color_array[t])
+
 def PlotGridCellValue(grid, array, threshold, fignum):
     # Plot cells only
     PlotGridCells(grid, fignum)
@@ -1367,6 +1411,22 @@ def PlotGridCellValue(grid, array, threshold, fignum):
     for i in np.arange(0, grid.cell.ntot, 1):
         if (array[i] >  threshold) :
             PlotPoints2D(grid.cell.x[i], grid.cell.y[i], fignum, marker='.', color='b')
+
+def PlotGridCellArray(grid, array, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)  
+
+    # Plot cutcells
+    for i in np.arange(0,len(array), 1):
+        PlotPoints2D(grid.cell.x[array[i]-1], grid.cell.y[array[i]-1], fignum, marker='.', color='b') 
+
+def PlotGridCellVertArray(grid, array, fignum):
+    # Plot cells only
+    PlotGridCells(grid, fignum)  
+
+    # Plot verts
+    for i in np.arange(0,len(array), 1):
+        PlotPoints2D(grid.vert.x[array[i]-1], grid.vert.y[array[i]-1], fignum, marker='.', color='b') 
 
 # Grid topological data
 def PlotGridTopologicalData(grid, fignum):
@@ -1404,6 +1464,45 @@ def PlotGridTopologicalData(grid, fignum):
         for i in np.arange(0, grid.topodata.ndiv, 1):
             tdivfaces = grid.topodata.GetDivFace(i)
             PlotPolygons2D(xf[tdivfaces-1], yf[tdivfaces-1], fignum, label='divertor target ' + str(i))
+
+# Grid generation data plotting: cells
+def PlotTriaCells(tria, fignum):
+    # Plot cells only
+
+    # Initialize plotting bounds
+    xb = [min(tria.vert.x), max(tria.vert.x)]
+    yb = [min(tria.vert.y), max(tria.vert.y)]
+
+    # Construct cell coordinates
+    xc = np.zeros(tria.cell.nvert + 2*tria.cell.ntot, dtype=float)
+    yc = np.zeros(tria.cell.nvert + 2*tria.cell.ntot, dtype=float)
+
+    counter = 0
+    for i in np.arange(0, tria.cell.ntot): 
+        tv = tria.cell.vert[i,:]-1
+        xc[counter:counter+3] = tria.vert.x[tv]
+        xc[counter+3] = tria.vert.x[tv[0]]
+        xc[counter+4] = np.NaN
+        yc[counter:counter+3] = tria.vert.y[tv]
+        yc[counter+3] = tria.vert.y[tv[0]]
+        yc[counter+4] = np.NaN
+
+        counter = counter + 5
+    
+    # Plot
+    PlotPolygons2D(xc, yc, fignum, color='k', marker='', linewidth=0.25)
+
+     # Set axes
+    SetAxesLimits2D(plt.gca(), xb, yb)
+
+def PlotTriaCellVertArray(tria, array, fignum):
+    # Plot cells only
+    PlotTriaCells(tria, fignum)
+
+    # Plot verts
+    for i in np.arange(0,len(array), 1):
+        PlotPoints2D(tria.vert.x[array[i]-1], tria.vert.y[array[i]-1], fignum, marker='.', color='b')     
+
 #--------------------------------------------------------------------------#
 #                             Shape Optimization                           #
 #--------------------------------------------------------------------------#

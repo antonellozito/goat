@@ -37,16 +37,11 @@ VERSION 1.00.00
 # Face label mappings between GG (grid generator) and GD (grid deformation)
 # See SetGOAToptions.m or InterfaceGAtoGD.m for a description of the GD 
 # face label mappings. 
-'goat.GDtoGA.facelabelsubfrom'       '[-99, -25,  4, 5, 6, 7, 8, 9, 10, 11, 12]'
-'goat.GDtoGA.facelabelsubto'         '[1, -21, 3, 3, 3, 3, 3, 3, 3, 3, 3]'
-'goat.GDtoGA.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
-'goat.GDtoGA.facelabelmappingGD'     '[1, 1,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
-
-# Face label mappings between GG and GA (grid adaptation)
-'goat.GGtoGA.facelabelsubfrom'       '[-99, -25]'
-'goat.GGtoGA.facelabelsubto'         '[3, -21]'
-'goat.GGtoGA.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
-'goat.GGtoGA.facelabelmappingGA'     '[4, 5,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1, 3]'
+'goat.facelabelsubfrom'       '[-99, -25,  4, 5, 6, 7, 8, 9, 10, 11, 12]'
+'goat.facelabelsubto'         '[1, -21, 3, 3, 3, 3, 3, 3, 3, 3, 3]'
+'goat.facelabelmappingGG'     '[1, 2, -21, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]'
+'goat.facelabelmappingGD'     '[1, 1,   2, 4, 4, 4, 4, 4, 4, 4,  4,  4,  4, 3]'
+'goat.facelabelmappingGA'     '[4, 5,   2, 1, 1, 1, 1, 1, 1, 1,  1,  1,  1, 3]'
 
 #-------------------------------------------------------------------------#
 #                          GRID OPTIONS                                   #
@@ -365,21 +360,18 @@ VERSION 1.00.00
 'ga.bunch_pent'      '0'
 'ga.BLG'             '0'
 'ga.BLG_n_layers'    '3'
-'ga.splitting'       '0'
-'ga.splitting2'      '0'
-'ga.splitting3'      '0'
-'ga.splitting4'      '0'
-'ga.merging'         '0'
+'ga.splitting'       '[0, 0, 0, 0]'
+'ga.merging'         '[0, 0, 0, 0]'
 'ga.pents_to_tria'   '0'
 'ga.merging2'        '0'
 
 # Splitting options
 'ga.no_pents'         '1'
-'ga.splittype'       'pol'
-'ga.n_split'         '10'
+'ga.splittype'       '[2, 2, 1, 2]'
+'ga.n_split'         '[10, 100, 15, 30]'
 'ga.typeT'           'cutcell'
-'ga.rad_type'        'farSOL'
-'ga.pol_type'        'h_pol'
+'ga.rad_type'        '[4, 6, 4, 6]'
+'ga.pol_type'        '[2, 2, 3, 5]'
 
 'ga.splittype2'        'pol'
 'ga.n_split2'          '100'
@@ -402,8 +394,8 @@ VERSION 1.00.00
 
 # Merging options
 'ga.no_hex'           '1'
-'ga.merge_crit'       'h_pol'
-'ga.n_merg'           '100'
+'ga.merge_crit'       '[3, 8, 0, 0]'
+'ga.n_merge'          '[100, 100, 0, 0]'
 'ga.dist_function_threshold_merge' '0.75'
 'ga.merg_crit2'       'bias_rad_farSOL'
 'ga.n_merg2'          '100'

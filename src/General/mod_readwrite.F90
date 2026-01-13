@@ -21,6 +21,19 @@ module mod_readwrite
     save
     public 
 
+
+
+    !==================================================================!
+    !                                                                  !
+    !                          INTERFACES                              !
+    !                                                                  !
+    !==================================================================!
+
+    ! Write array
+    interface WriteArray
+        module procedure WriteArrayI8, WriteArrayR8
+    end interface
+
     contains 
 
     !==================================================================!
@@ -151,6 +164,90 @@ module mod_readwrite
 
     end subroutine
 
+    !------------------------------------------------------------------!
+    !                           Writing                                !
+    !------------------------------------------------------------------!
     
+    subroutine WriteArrayI8(a, filename)
+
+        ! Description
+        !============
+        ! Write an integer array in a file
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        integer(I8), intent(in)  :: a(:)
+        character(*), intent(in) :: filename 
+
+        ! Auxiliary
+        integer :: fu     
+        integer(I8) :: i
+        character(:), allocatable :: dir
+
+        ! Construct writing directory
+        dir = './output' // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Size data
+        write (fu, *) 'Elements'
+        write (fu, *) size(a)
+
+        ! Array
+        write (fu, *) 'ID val(ID)'
+        do i = 1, size(a)
+            write(fu, *) i, a(i)
+        end do
+
+        close(fu)
+
+    end subroutine
+
+    subroutine WriteArrayR8(a, filename)
+
+        ! Description
+        !============
+        ! Write an integer array in a file
+
+        ! Declare variables
+        !==================
+        ! Modules  
+        use mod_specialchars, only : filesepchar
+
+        ! Arguments
+        real(R8), allocatable :: a(:)
+        character(*), intent(in) :: filename 
+
+        ! Auxiliary
+        integer :: fu     
+        integer(I8) :: i
+        character(:), allocatable :: dir
+
+        ! Construct writing directory
+        dir = './output' // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Size data
+        write (fu, *) 'Elements'
+        write (fu, *) size(a)
+
+        ! Array
+        write (fu, *) 'ID val(ID)'
+        do i = 1, size(a)
+            write(fu, *) i, a(i)
+        end do
+
+        close(fu)
+
+    end subroutine
 
 end module
