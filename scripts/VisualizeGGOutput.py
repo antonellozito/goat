@@ -104,7 +104,7 @@ try:
     print(vals)
 
     # Visualize
-    plotter.PlotPolygons2D(vals[:, 0], vals[:, 1], 2, linewidth=2, color='k', label='void polygons')
+    plotter.PlotPolygons2D(vals[:, 0], vals[:, 1], 2, linewidth=2, color='r', label='void polygons')
     thisaxes = plt.gca()
     thisaxes.legend()
 except: 
