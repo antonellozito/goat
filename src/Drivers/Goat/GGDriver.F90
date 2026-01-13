@@ -39,6 +39,7 @@ subroutine GGDriver(goatoptions)
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
     type(PolygonSetUDT)         :: voidps
+    type(GGTMDataUDT)           :: ggtmdata
 
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
         yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
@@ -126,13 +127,13 @@ subroutine GGDriver(goatoptions)
     !==================
     call GenerateUnstructuredAlignedGrid(grid, topomesh, magneticField, &
         environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
-        ggoptions)
+        ggoptions, ggtmdataopt=ggtmdata)
 
     ! Write data
     !===========
     ! Translate labels etc
-    call TranslateGridLabels(grid, topomesh, environment%vessel, ggoptions, &
-        'solps')
+    call TranslateGridLabels(grid, topomesh, environment%vessel, ggtmdata, &
+        ggoptions, 'solps')
 
     ! Recompute topological data from grid for new face labels
     call ComputeTopologicalData(grid, topomesh)
@@ -141,9 +142,10 @@ subroutine GGDriver(goatoptions)
     call WriteGOAT(goatoptions, grid, magneticField, environment)
 
     ! Fort.78 file with void regions
-    call ComputeVoidRegionPolygonSet(grid, topomesh, environment%vessel, &
-        voidps)
+    call ComputeVoidRegionPolygonSet(grid, topomesh, environment%triangulationvessel, &
+        ggtmdata, voidps)
     call WriteVoidRegionFile(voidps, grid, 'fort.78')
+    call WriteVoidRegionFileGoat(voidps, grid, 'fort_goat.78')
 
     ! b2ag file
     !call Writeb2agdat(goatoptions, grid)

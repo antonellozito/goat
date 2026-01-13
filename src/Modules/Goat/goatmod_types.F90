@@ -542,10 +542,10 @@ module goatmod_types
         
         integer(I8)                             :: nel, nv
         integer(I8), allocatable, dimension(:)  :: elID, elfcLbl, elv1, &
-            elv2, elvessel
+            elv2, elvessel, trimark
         real(R8), allocatable, dimension(:)     :: elvx, elvy
 
-        logical     :: hasEl, hasElFcLbl, hasElVessel
+        logical     :: hasEl, hasElFcLbl, hasElVessel, hasElVoid
 
     contains 
 
@@ -564,6 +564,9 @@ module goatmod_types
 
         ! Vessel structure extraction
         procedure :: ExtractVesselStructures => ExtractDGVesselStructures
+
+        ! Triangulation structure extraction
+        procedure :: ExtractTriangulationStructures  => ExtractDGTriangulationStructures
 
     end type
 
@@ -699,6 +702,13 @@ module goatmod_types
         ! Vessel vertex pairs getter
         procedure :: GetVesselVertexPairs
 
+        ! Vessel structure label getters
+        procedure :: GetVesselStructureLabelsOnPoints, &
+            GetVesselStructureLabelsOnEdges
+
+        ! Vessel polygonset writer (structure.dat format)
+        procedure :: WriteVesselPolygon
+
     end type
 
     ! Environment
@@ -709,13 +719,23 @@ module goatmod_types
         !============
         ! Overarching type that stores all other structures etc which 
         ! may be needed for grid optimization, and which are not 
-        ! related to the grid or the magnetic field.
+        ! related to the grid or the magnetic field. Currently, 
+        ! the vessel structure is stored here that is used to construct
+        ! the plasma grid (named 'vessel') and the vessel structure
+        ! that should be used to determine the triangulation 
+        ! (triangulationvessel). It is assumed that the triangulation 
+        ! vessel structure is compatible with the plasma edge grid
+        ! vessel structure (they may be the same, or the triangulation
+        ! vessel structure may hold additional void regions and exclude
+        ! vessel structures with negative label, which are assumed to be
+        ! 'fake' vessel structures used to bound the plasma grid)
 
         ! Note: the routine to set up the vessel is currently a 
         ! standalone routine. Should we include it here as a 
         ! method of the vessel structure?
 
         type(VesselUDT)                 :: vessel
+        type(VesselUDT)                 :: triangulationvessel
         type(StateUDT)                  :: SOLPSstate    
 
     contains
@@ -5178,10 +5198,15 @@ module goatmod_types
     
             ! Read in the vessel structure
             vesseloptions%filepath = environmentoptions%vesselfilepath
-            call ReadVessel(filespecifier, environment%vessel, vesseloptions)
+            call ReadVessel(filespecifier, environment%vessel, &
+                environment%triangulationvessel, vesseloptions)
     
             ! Extract the vessel data
             call ExtractVesselData(environment%vessel, vesseloptions)
+            
+            ! Extract triangulation vessel data (options assumed to be 
+            ! checked in ReadVessel!)
+            call ExtractVesselData(environment%triangulationvessel, vesseloptions) 
     
         case default
     
@@ -5354,7 +5379,7 @@ module goatmod_types
     end subroutine
 
     ! Readers
-    subroutine ReadVessel(filespecifier, vessel, vesseloptions)
+    subroutine ReadVessel(filespecifier, vessel, triangulationvessel, vesseloptions)
 
         ! Description
         !============
@@ -5376,13 +5401,14 @@ module goatmod_types
         ! Arguments
         integer                         :: filespecifier
         type(VesselOptionsUDT)          :: vesseloptions 
-        type(VesselUDT)                 :: vessel
+        type(VesselUDT)                 :: vessel, triangulationvessel
         type(DivGeoDataUDT)             :: dgdata
     
         ! Loop variables
     
         ! Auxiliary variables 
-        type(VesselStructureUDT), allocatable   :: structures(:)
+        type(VesselStructureUDT), allocatable   :: structures(:), &
+            triangulationstructures(:)
         integer(I8)                             :: flag
     
         ! Main program
@@ -5395,15 +5421,30 @@ module goatmod_types
             ! Read in the separate vessel structures
             call read_structure(filespecifier, vessel, vesseloptions)
     
-            ! Reformat the structures of the vessel into a single vessel
-            ! polygon
-            ! call FormatVesselStructures(vessel)
+            ! No additional information on triangulation vessel, so will
+            ! be the same as the original vessel 
+            triangulationvessel = vessel
 
         case ('read_dg')
+
+            ! Check options: no structures are allowed to be deleted to
+            ! avoid issues with void polygon! These structures should then 
+            ! not be included in the divgeo setup...
+        
+            ! Check options
+            if (size(vesseloptions%exclude) > 0) then 
+                ! Throw hard error for now
+                call gdErrorHandler('ReadVessel: when reading dgo output, ' // & 
+                    'vessel parts may not be excluded using the exclude option ' // & 
+                    'of goat. If structures should be excluded, do this in ' // & 
+                    'the divgeo setup.')
+            end if 
 
             ! Read from DivGeo file
             call dgdata%Initialize()
             call dgdata%Read(vesseloptions%filepath)
+
+            ! Read plasma vessel structures
             call dgdata%ExtractVesselStructures(structures, flag)
 
             ! Check
@@ -5412,9 +5453,20 @@ module goatmod_types
                     'vessel structure data from DivGeo file')
             end if 
 
-            ! Initialize
+            ! Initialize vessel
             vessel%nstructures = int(size(structures), kind=I4)
             vessel%structures = structures
+
+            ! Read triangulation structures
+            call dgdata%ExtractTriangulationStructures(triangulationstructures, flag)
+            if (flag > 0) then 
+                call gdErrorHandler('ReadVessel: could not read in ' // & 
+                    'triangulation vessel structure data from DivGeo file')
+            end if
+
+            ! Initialize triangulation vessel
+            triangulationvessel%nstructures = int(size(triangulationstructures), kind=I4)
+            triangulationvessel%structures = triangulationstructures
     
         case default
     
@@ -6728,8 +6780,302 @@ module goatmod_types
         do i = 1, vessel%polygonset%np 
             xv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%x
             yv(cc+1:cc+vessel%polygonset%polygons(i)%nv) = vessel%polygonset%polygons(i)%y
+
+            ! Update counter
+            cc = cc + vessel%polygonset%polygons(i)%nv
         end do
 
+
+    end subroutine
+
+    ! Get vessel labels on query points
+    subroutine GetVesselStructureLabelsOnPoints(vessel, xq, yq, labels)
+
+        ! Description
+        !============
+        ! Dedicated routine to get the vessel structure labels on 
+        ! arbitrary query points. This routine is more involved than
+        ! just calling the EvaluateLabel routine of the exact polygon
+        ! representation, because that one may be inaccurate near vessel
+        ! structure transitions. Here, we evaluate first the edges/vertices
+        ! on which the query points lie, and then check the labels of 
+        ! the vertices (of those edges). The two first labels should 
+        ! indicate the structure labels (the second one is zero if it 
+        ! lies only on that structure). 
+
+        ! Note: two label values are possible, since query points may
+        ! lie on an edge and that edge may hold multiple labels, for
+        ! which we cannot distinguish in this routine (this should be 
+        ! dealt with upstream...)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                        :: vessel 
+        real(R8), dimension(:), intent(in)      :: xq, yq 
+        integer(I8), allocatable, dimension(:, :)   :: labels 
+
+        ! Auxiliary
+        integer(I8)                             :: nq, v1, v2
+        integer(I8), allocatable, dimension(:)  :: edgeID, vertID
+        integer(I8), allocatable, dimension(:, :)   :: templabels
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Unpack number of query points
+        nq = size(xq)
+
+        ! Sanity check
+        if (size(xq) /= size(yq)) then 
+            call gdErrorHandler('GetVesselStructureLabelsOnPoints: size mismatch ' // & 
+                'between xq, yq')
+        end if 
+
+        ! Check labels status
+        if (allocated(labels)) then 
+            if (size(labels, 1) /= size(xq)) then 
+                deallocate(labels)
+                allocate(labels(nq, 2))
+            end if 
+        else
+            allocate(labels(nq, 2))
+        end if 
+        
+        ! Initialize
+        labels = 0
+
+        ! Compute labels
+        !===============
+        ! Labels are assumed to be given in first and second column
+        call vessel%exactplfvessel_noref%EvaluateLabel(xq, yq, templabels, &
+            edgeIDopt=edgeID, vertIDopt=vertID)
+
+        ! Sanity check
+        if (size(templabels, 2) < 2) then 
+            call gdErrorHandler('GetVesselStructureLabelsOnPoints: expected at ' // &
+                'least two labels per vertex but found less. Unexpected')
+        end if 
+
+        ! Unpack
+        associate(&
+            vlabels     => vessel%exactplfvessel_noref%vertlabel,   &
+            vp1         => vessel%exactplfvessel_noref%vp1,         &
+            vp2         => vessel%exactplfvessel_noref%vp2          &
+            )
+
+        ! Loop over all query points
+        do i = 1, nq
+            ! First, check if it lies on an edge (typically most likely 
+            ! scenario)
+            if (edgeID(i) /= 0) then
+                ! Take the vertices of this edge
+                v1 = vp1(edgeID(i))
+                v2 = vp2(edgeID(i))
+                
+                ! Sanity checks
+                if (vlabels(v1, 1) == 0 .or. vlabels(v2, 1) == 0) then 
+                    call gdErrorHandler('GetVesselStructureLabelsOnPoints: ' // &
+                        'vertices detected that do not have structure ' // & 
+                        'labels, unexpected')
+                end if 
+
+                ! Check label occurrence
+                if (vlabels(v1, 2) == 0) then 
+                    ! Normally, label should simply be vlabels(v1, 1), but 
+                    ! we do some sanity checks
+                    if (vlabels(v2, 2) == 0) then 
+                        if (vlabels(v1, 1) /= vlabels(v2, 1)) then 
+                            ! Different labels, unexpected - throw warning
+                            print *, 'GetVesselStructureLabelsOnPoints: each vertex ' // & 
+                                'belongs to a single yet different structure, ' // & 
+                                'unexpected. Taking first structure value...'
+                        end if
+                    else
+                        if (.not. any(vlabels(v1, 1) == vlabels(v2, 1:2))) then 
+                            ! Different labels, unexpected - throw warning
+                            print *, 'GetVesselStructureLabelsOnPoints: each vertex ' // & 
+                                'belongs to a single yet different structure, ' // & 
+                                'unexpected. Taking first structure value...'
+                        end if 
+                    end if 
+
+                    ! Add
+                    labels(i, 1) = vlabels(v1, 1)
+                else 
+                    ! Need to check which one to take 
+                    if (vlabels(v2, 2) == 0) then 
+                        ! Normally, label should simply be vlabels(v2, 1), but 
+                        ! we do some sanity checks
+                        if (.not. any(vlabels(v2, 1) == vlabels(v1, 1:2))) then 
+                            ! Different labels, unexpected - throw warning
+                            print *, 'GetVesselStructureLabelsOnPoints: each vertex ' // & 
+                                'belongs to a single yet different structure, ' // & 
+                                'unexpected. Taking first structure value...'
+                        end if 
+
+                        ! Add
+                        labels(i, 1) = vlabels(v2, 1)
+                    else
+                        ! Both are non-negative: need to check all combinations
+                        if (any(vlabels(v1, 1) == vlabels(v2, 1:2)) .and. &
+                            any(vlabels(v1, 2) == vlabels(v2, 1:2))) then 
+                            ! Cannot distinguish between both possibilities, unexpected
+                            print *, 'GetVesselStructureLabelsOnPoints: each vertex ' // & 
+                                'belongs to two structures, cannot discriminate ' // & 
+                                'which one to take - unexpected. Taking both structure values...'   
+                            labels(i, 1:2) = vlabels(v1, 1:2)
+                        elseif (any(vlabels(v1, 1) == vlabels(v2, 1:2)) .and. &
+                            .not. any(vlabels(v1, 2) == vlabels(v2, 1:2))) then 
+                            labels(i, 1) = vlabels(v1, 1)
+                        elseif (any(vlabels(v1, 2) == vlabels(v2, 1:2)) .and. &
+                            .not. any(vlabels(v1, 1) == vlabels(v2, 1:2))) then 
+                            labels(i, 1) = vlabels(v1, 2)
+                        else
+                            ! No agreement found - unexpected    
+                            print *, 'GetVesselStructureLabelsOnPoints: each vertex ' // & 
+                                'belongs to multiple yet different structures, ' // & 
+                                'unexpected. Taking first structure value...'
+                            labels(i, 1) = vlabels(v1, 1)
+                        end if 
+                    end if 
+                end if 
+            end if  
+
+            ! Otherwise, check the vertex
+            if (vertID(i) /= 0) then 
+                ! Simply return the vertex labels
+                labels(i, 1:2) = vlabels(vertID(i), 1:2)
+            end if
+        end do 
+
+        ! Housekeeping
+        end associate 
+
+    end subroutine
+
+    ! Get vessel labels on edges
+    subroutine GetVesselStructureLabelsOnEdges(vessel, xq1, yq1, &
+        xq2, yq2, labels)
+
+        ! Description
+        !============
+        ! Same routine as the '...OnPoints' one, but now the query 
+        ! coordinates are assumed to form edges (e.g. face vertex 
+        ! coordinates of grid faces). Here, the labels are first defined
+        ! for each edge vertex. Then, these labels are compared such 
+        ! that a single label is returned per edge (if possible). 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(VesselUDT)                        :: vessel 
+        real(R8), dimension(:), intent(in)      :: xq1, xq2, yq1, yq2 
+        integer(I8), allocatable, dimension(:)  :: labels 
+
+        ! Auxiliary
+        integer(I8)                             :: nq
+        integer(I8), allocatable, dimension(:, :)   :: labelsv1, &
+            labelsv2 
+
+        ! Loop
+        integer(I8)                             :: i 
+
+        ! Initialize
+        !===========
+        ! Number of query points
+        nq = size(xq1, 1)
+
+        ! Sanity checks
+        if ((nq /= size(yq1)) .or. (nq /= size(yq1)) .or. (nq /= size(yq1))) then 
+            call gdErrorHandler('GetVesselSTructureLabelsOnEdges: ' // &
+                'incompatible dimensions of input coordinates')
+        end if 
+
+        ! Edge labels
+        if (allocated(labels)) then 
+            if (size(labels) /= nq) then 
+                deallocate(labels)
+                allocate(labels(nq)) 
+            end if
+        else
+            allocate(labels(nq))
+        end if 
+        labels = 0
+
+        ! Vertex labels
+        call vessel%GetVesselStructureLabelsOnPoints(xq1, yq1, &
+            labelsv1)
+        call vessel%GetVesselStructureLabelsOnPoints(xq2, yq2, &
+            labelsv2)
+
+        ! Compute edge labels
+        !====================
+        do i = 1, nq
+            ! Check labels
+            ! Check label occurrence
+            if (labelsv1(i, 2) == 0) then 
+                ! Normally, label should simply be labelsv1(i, 1), but 
+                ! we do some sanity checks
+                if (labelsv2(i, 2) == 0) then 
+                    if (labelsv1(i, 1) /= labelsv2(i, 1)) then 
+                        ! Different labels, unexpected - throw warning
+                        print *, 'GetVesselStructureLabelsOnEdges: each edge vertex ' // & 
+                            'belongs to a single yet different structure, ' // & 
+                            'unexpected. Taking first structure value...'
+                    end if
+                else
+                    if (.not. any(labelsv1(i, 1) == labelsv2(i, 1:2))) then 
+                        ! Different labels, unexpected - throw warning
+                        print *, 'GetVesselStructureLabelsOnEdges: each edge vertex ' // & 
+                            'belongs to a single yet different structure, ' // & 
+                            'unexpected. Taking first structure value...'
+                    end if 
+                end if 
+
+                ! Add
+                labels(i) = labelsv1(i, 1)
+            else 
+                ! Need to check which one to take 
+                if (labelsv2(i, 2) == 0) then 
+                    ! Normally, label should simply be labelsv2(i, 1), but 
+                    ! we do some sanity checks
+                    if (.not. any(labelsv2(i, 1) == labelsv1(i, 1:2))) then 
+                        ! Different labels, unexpected - throw warning
+                        print *, 'GetVesselStructureLabelsOnEdges: each edge vertex ' // & 
+                            'belongs to a single yet different structure, ' // & 
+                            'unexpected. Taking first structure value...'
+                    end if 
+
+                    ! Add
+                    labels(i) = labelsv2(i, 1)
+                else
+                    ! Both are non-negative: need to check all combinations
+                    if (any(labelsv1(i, 1) == labelsv2(i, 1:2)) .and. &
+                        any(labelsv1(i, 2) == labelsv2(i, 1:2))) then 
+                        ! Cannot distinguish between both possibilities, unexpected
+                        print *, 'GetVesselStructureLabelsOnEdges: each edge vertex ' // & 
+                            'belongs to two structures, cannot discriminate ' // & 
+                            'which one to take - unexpected. Taking first structure value...'   
+                        labels(i) = labelsv1(i, 1)
+                    elseif (any(labelsv1(i, 1) == labelsv2(i, 1:2)) .and. &
+                        .not. any(labelsv1(i, 2) == labelsv2(i, 1:2))) then 
+                        labels(i) = labelsv1(i, 1)
+                    elseif (any(labelsv1(i, 2) == labelsv2(i, 1:2)) .and. &
+                        .not. any(labelsv1(i, 1) == labelsv2(i, 1:2))) then 
+                        labels(i) = labelsv1(i, 2)
+                    else
+                        ! No agreement found - unexpected    
+                        print *, 'GetVesselStructureLabelsOnEdges: each edge vertex '  // & 
+                            'belongs to multiple yet different structures, ' // & 
+                            'unexpected. Taking first structure value...'
+                        labels(i) = labelsv1(i, 1)
+                    end if 
+                end if 
+            end if   
+        end do 
 
     end subroutine
 
@@ -6851,6 +7197,7 @@ module goatmod_types
         dgdata%hasEl            = .false. 
         dgdata%hasElFcLbl       = .false.
         dgdata%hasElVessel      = .false. 
+        dgdata%hasElVoid        = .false. 
 
         ! Elements & points
         dgdata%nel      = 0
@@ -6934,6 +7281,7 @@ module goatmod_types
         ! From this data, different other base quantities are derived, 
         ! such as the element vertices (as a ne-by-2 array) and the 
         ! vertices themselves. If data is not present, then the 
+        ! corresponding logicals are set to false. 
 
         ! Declare variables
         !==================
@@ -7151,7 +7499,16 @@ module goatmod_types
             end if 
         end if 
 
+        ! Print 
+        if (dgdata%haselfcLbl) then 
+            print *, 'ReadDGData: fcLbl read in'
+        else
+            print *, 'ReadDGData: could not read fcLbl'
+        end if 
+
         ! Read vessel elements
+        !---------------------
+        ! Only if elements are present
         if (dgdata%hasEl) then 
             ! Rewind the file
             rewind(fid)
@@ -7204,7 +7561,69 @@ module goatmod_types
         ! Print 
         if (dgdata%haselvessel) then 
             print *, 'ReadDGData: vessel elements read in'
+        else
+            print *, 'ReadDGData: could not read vessel elements'
         end if 
+
+        ! Read void elements
+        !-------------------
+        ! Only if elements are present
+        if (dgdata%hasEl) then 
+            ! Rewind the file
+            rewind(fid)
+
+            ! Read until we find 'trimark'
+            dgdata%haselvoid = .true.
+            call ReadUntilMatchFound(fid, 'trimark', ' ', reachedeof)
+            if (reachedeof) then 
+                ! Set to false
+                dgdata%haselvoid = .false. 
+            else
+                ! Initialize
+                allocate(worki(0))
+
+                ! Read in data
+                do while (.true.)
+                    ! Read in the next triplet
+                    call ReadSingleLine(fid, thisline, reachedeof)
+
+                    ! Check for EOF
+                    if (reachedeof) then 
+                        exit 
+                    end if 
+
+                    ! Check if we can extract 
+                    call ExtractIntegerFromString1D(thisline, tempi, islegal)
+
+                    ! Check if the read was legal
+                    if (.not. islegal) then 
+                        exit
+                    end if 
+                    if (size(tempi) /= 1) then ! Expected size 1
+                        exit
+                    end if 
+
+                    ! Add the coordinates
+                    worki = [worki, tempi]
+
+                end do 
+
+                ! Add
+                dgdata%trimark = worki
+
+                ! Housekeeping
+                deallocate(worki)
+
+            end if 
+        end if 
+
+        ! Print 
+        if (dgdata%haselvessel) then 
+            print *, 'ReadDGData: void elements read in'
+        else
+            print *, 'ReadDGData: could not read void elements'
+        end if 
+
 
         ! Housekeeping
         !=============
@@ -7493,6 +7912,154 @@ module goatmod_types
         call WriteStructureFile('vessel_dgo', structures)
 
     end subroutine
+ 
+    ! Void structure extraction
+    subroutine ExtractDGTriangulationStructures(dgdata, structures, flag)
+
+        ! Description
+        !============
+        ! This routine extracts structures that are part of the structure
+        ! that should be considered for triangulation (and EIRENE) by
+        ! an external triangulation routine. Additional elements may
+        ! be introduced (these elements may overlap with vessel elements 
+        ! as long as they form a set of closed non-intersecting
+        ! polygons). Additionally, elements with negative fcLbl are 
+        ! ignored as they are assumed to be 'fake' vessel boundaries 
+        ! used to limit the plasma. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(DivGeoDataUDT)            :: dgdata
+        type(VesselStructureUDT), allocatable, intent(out)  :: structures(:) 
+        integer(I8), intent(out)        :: flag
+
+        ! Auxiliary
+        integer(I8)                 :: nvs, tfcLbl, flagv 
+        integer(I8), allocatable, dimension(:)  :: fcLblu, vessfcLbl, &
+            tel, temptrimark 
+        type(VesselStructureUDT), allocatable, dimension(:)     :: &
+            tempstructures, vesselstructures
+
+        ! Loop
+        integer(I8)                 :: i, j, k, sID 
+
+        ! Initialize
+        !===========
+        ! Set to success
+        flag = 0
+
+        ! Check if vessel elements are present
+        if (.not. dgdata%hasElVessel) then 
+            print *, 'ExtractDGTriangulationStructures: no vessel element data ' // &
+                'present, cannot proceed. Returning...'
+            flag = 1
+            return 
+        end if 
+        if (.not. dgdata%hasElFcLbl) then 
+            print *, 'ExtractDGTriangulationStructures: fcLbl not present, ' // &
+                'which is required for vessel data. Returning...'
+            flag  = 2
+            return 
+        end if 
+        if (.not. dgdata%hasElVoid) then 
+            print *, 'ExtractDGTriangulationStructures: void element data not present, ' // &
+                'which is required for triangulation data. Returning...'
+            flag = 3
+        end if 
+        
+        ! Check if all vessel labels are non-zero
+        if (any(dgdata%elfcLbl(dgdata%elvessel) == 0)) then 
+            print *, 'ExtractDGTriangulationStructures: vessel segments with ' // &
+                'zero label detected, not supported. Check dg setup. ' // & 
+                'Returning...'
+            flag = 3
+            return 
+        end if
+
+        ! Extract standard vessel structures
+        !===================================
+        ! Extract vessel structures using dedicated routine
+        call ExtractDGVesselStructures(dgdata, vesselstructures, flagv)
+
+        ! Sanity check
+        if (flagv /= 0) then 
+            print *, 'flag of vessel structure extraction = ', flagv 
+            print *, 'ExtractDGTriangulationStructures: could not extract ' // & 
+                'vessel structures. Returning...'
+            flag = 5
+            return 
+        end if 
+
+        ! Extract additional void structures
+        !===================================
+        ! Set any trimark of vessel edges to zero - should not be added
+        ! twice 
+        temptrimark = dgdata%trimark 
+        temptrimark(dgdata%elvessel) = 0
+
+        ! Compute unique number of polygon labels
+        allocate(vessfcLbl(count(temptrimark /= 0)))
+        vessfcLbl = pack(temptrimark, temptrimark /= 0)
+        call Unique(vessfcLbl, fcLblu)
+        nvs = size(fcLblu)
+
+        ! Allocate
+        allocate(structures(0)) ! not a priori known how many polygons we'll have
+
+        ! Determine structures
+        sID = 0
+        do i = 1, nvs 
+            ! Get labels for this unique label
+            tfcLbl = fcLblu(i)
+
+            ! Check which elements have this label
+            allocate(tel(count(temptrimark == tfcLbl)))
+            tel = pack([(k, k = 1, dgdata%nel)], temptrimark == tfcLbl)
+
+            ! Extract the structures
+            call dgdata%ExtractStructures(tempstructures, tel, flag)
+
+            ! Checks
+            if (flag /= 0) then 
+                print *, 'ExtractDGVesselStructures: could not extract ' // & 
+                    'structures for label', fcLblu(i), ', returning...'
+                return
+            end if 
+
+            ! Adjust ID
+            do j = 1, size(tempstructures)
+                sID = sID + 1
+                tempstructures(j)%ID = int(sID, kind=I4)
+                tempstructures(j)%label = int(fcLblu(i), kind=I4)
+            end do 
+            
+            ! Add
+            structures = [structures, tempstructures]
+
+            ! Housekeeping
+            deallocate(tel)
+        end do 
+
+        ! Append vessel structures with non-negative label (and overwrite
+        ! their ID)
+        do i  = 1, size(vesselstructures)
+            if (vesselstructures(i)%label > 0) then 
+                ! Update counter
+                sID = sID + 1 
+
+                ! Append structure
+                structures = [structures, vesselstructures(i)]
+
+                ! Update ID
+                structures(size(structures))%ID = int(sID, kind=I4)
+            end if 
+        end do
+
+        ! Write
+        call WriteStructureFile('vessel_tria_dgo', structures)
+
+    end subroutine
 
     ! Structure file writing
     subroutine WriteStructureFile(filename, structures)
@@ -7540,7 +8107,7 @@ module goatmod_types
         !=====================
         do i = 1, ns
             ! Write structure header
-            write (fu, *) 'Structure ', structures(i)%ID
+            write (fu, *) 'Structure ', structures(i)%label
 
             ! Write structure polygon
             write (fu, *) structures(i)%np 

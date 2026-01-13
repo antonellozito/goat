@@ -41,6 +41,7 @@ subroutine GGGDDriver(goatoptions)
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
     type(VesselUDT)             :: tempvessel
+    type(GGTMDataUDT)           :: ggtmdata
 
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
         yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
@@ -138,7 +139,7 @@ subroutine GGGDDriver(goatoptions)
     !==================
     call GenerateUnstructuredAlignedGrid(grid, topomesh, magneticField, &
         environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
-        ggoptions)
+        ggoptions, ggtmdataopt=ggtmdata)
 
     ! Apply grid deformation
     !=======================
@@ -169,8 +170,8 @@ subroutine GGGDDriver(goatoptions)
     ! Write data
     !===========
     ! Translate labels etc
-    call TranslateGridLabels(grid, topomesh, environment%vessel, ggoptions, &
-        'solps')
+    call TranslateGridLabels(grid, topomesh, environment%vessel, ggtmdata, &
+        ggoptions, 'solps')
 
     ! Recompute topological data from grid for new face labels
     call ComputeTopologicalData(grid, topomesh)
