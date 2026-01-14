@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '1'
-'goat.meth'                         'GA'
+'goat.meth'                         'GG'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -20,7 +20,7 @@ VERSION 1.00.00
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_small_trias'  
+'goat.writefilepath'                'traduit.out.b2us'  
 
 # Output options 
 'goat.write_final'                  '1'

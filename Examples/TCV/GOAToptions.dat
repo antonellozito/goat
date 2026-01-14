@@ -53,6 +53,7 @@ VERSION 1.00.00
 # Wide grid 
 'goat.facelabelmappingGG'   '[4, 2, -21, 1, 3, 5, 6, 7, 8, -9]'
 'goat.facelabelmappingGD'   '[1, 1, 2, 4, 4, 4, 4, 4, 4, 3]'
+'goat.facelabelmappingGA'   '[1, 1, 2, 4, 4, 4, 4, 4, 4, 3]'
 #'goat.facelabelmappingGG'   '[-4, -5, -6, -7, -1, -2, -3]'
 #'goat.facelabelmappingGD'   '[1, 1, 1, 1, 2, 3, 3]'
 
