@@ -20,7 +20,7 @@ module goatmod_userinput
     use mod_inputfileparser
     use mod_global_environment, only: solps, solps_inputfilepath, &
         solps_writefilepath, solps_gridfilepath, solps_magneticfieldfilepath, &
-        solps_structurefilepath, solps_outputfilepath
+        solps_statefilepath, solps_structurefilepath, solps_outputfilepath
 
     ! The usual
     implicit none
@@ -53,11 +53,14 @@ module goatmod_userinput
         ! - filepath: path towards the file where options are defined
         ! - gdfilepath: path towards the file where options for grid 
         ! deformation are defined
+        ! - readstate: logical to read state
+        ! - readstatemeth: method to read state, can be 'b2fstate' or 'b2fplasmf'
 
         ! Input filenames:
         ! - gridfilepath: file path to file with grid data (e.g. traduit.out.b2us file)
         ! - structurefilepath: structure.dat file to read
         ! - magneticfieldfilepath: magnetic field file to read
+        ! - statefilepath: state file to read
         ! - writefilepath: path where to write output traduit file
 
         ! Output options
@@ -75,23 +78,15 @@ module goatmod_userinput
         ! - artificial_slab: true if artificial slab
 
         ! Face label mappings
-        ! - GAtoGDfacelabelmappingGG: labels as defined in grid
-        ! generator for interfacing between GA and GD
-        ! - GAtoGDfacelabelmappingGD: corresponding labels for GD (so 
+        ! - facelabelmappingGG: labels as defined in grid
+        ! generator 
+        ! - facelabelmappingGD: corresponding labels for GD (so 
         ! first GG label is mapped to first GD label here)
-        ! - GAtoGDfacelabelsubfrom: substitution of this face label ... 
-        ! - GAtoGDfacelabelsubto: ... to this face label in GA to GD 
+        ! - facelabelmappingGA: corresponding labels for GA (so 
+        ! first GG label is mapped to first GA label here)
+        ! - facelabelsubfrom: substitution of this face label ... 
+        ! - facelabelsubto: ... to this face label in GA to GD 
         ! interface
-
-        ! - GGtoGDfacelabelmappingGG: idem above but for GG to GD 
-        ! - GGtoGDfacelabelmappingGD
-        ! - GGtoGDfacelabelsubfrom
-        ! - GGtoGDfacelabelsubto
-
-        ! - GGtoGAfacelabelmappingGG: idem above but for GG to GA
-        ! - GGtoGAfacelabelmappingGA
-        ! - GGtoGAfacelabelsubfrom
-        ! - GGtoGAfacelabelsubto
 
         ! Structure options
         ! - TP: structure numbers that are target plates
@@ -114,6 +109,9 @@ module goatmod_userinput
         character(:), allocatable   :: magneticfieldreadtype
         character(:), allocatable   :: filepath
         character(:), allocatable   :: gdinputfilepath
+        logical                     :: readstate
+        character(:), allocatable   :: readstatemeth
+
 
         ! Specify input filenames
         character(:), allocatable   :: gridfilepath
@@ -135,20 +133,12 @@ module goatmod_userinput
         logical                     :: artificial_slab
 
         ! Face label mappings
-        integer(I8), allocatable    :: GDtoGAfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GDtoGAfacelabelmappingGD(:) 
-        integer(I8), allocatable    :: GDtoGAfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GDtoGAfacelabelsubto(:) 
-
-        integer(I8), allocatable    :: GGtoGDfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GGtoGDfacelabelmappingGD(:) 
-        integer(I8), allocatable    :: GGtoGDfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GGtoGDfacelabelsubto(:) 
-
-        integer(I8), allocatable    :: GGtoGAfacelabelmappingGG(:)
-        integer(I8), allocatable    :: GGtoGAfacelabelmappingGA(:) 
-        integer(I8), allocatable    :: GGtoGAfacelabelsubfrom(:) 
-        integer(I8), allocatable    :: GGtoGAfacelabelsubto(:) 
+        integer(I8), allocatable    :: facelabelmappingGG(:)
+        integer(I8), allocatable    :: facelabelmappingGD(:) 
+        integer(I8), allocatable    :: facelabelmappingGA(:)        
+        integer(I8), allocatable    :: facelabelsubfrom(:) 
+        integer(I8), allocatable    :: facelabelsubto(:) 
+ 
 
         ! Structure options
         integer(I8), allocatable    :: TP(:)
@@ -186,7 +176,12 @@ module goatmod_userinput
         ! Facelabel mapping
         ! - facelabelmappingGG: list of face labels of the grid generator
         ! - facelabelmappingGA: mapping of grid generator label to labels
-        !                       needed for grid adaptation
+        !                       required for grid adaptation
+        ! - facelabelmappingGD: mapping of grid generator label to labels
+        !                       required for grid deformation
+        ! - facelabelsubfrom: face label of grid generator which should be 
+        !                       substituted
+        ! - facelabelsubto: substitution labels
 
         ! Operation options    
         ! - rem_small_trias: remove small triangles
@@ -223,10 +218,14 @@ module goatmod_userinput
         !                   boundary layer
         ! - BLG_rescaling_factor: size of the boundary layer wrt the 
         !                           upstream cells  
+        ! - BLG_smoothing_factors: first number is the threshold ratio of 
+        !              subsequent vertex displacement at which a rescaling need 
+        !              to be done, the second number of the maximal ratio allowed (clip)
         ! - rem_stickout_trias: remove triangle that are only connected 
         !                       with the grid via one face
-        ! - rem_trias_flux: remove flux tube with only two triangles and
-        !                   remove or merge flux tube with a both end a triangle
+        ! - rem_trias_tube: remove flux tube with only two triangles
+        ! - rem_outershell: remove or merge outer flux tubes with a triangle
+        !                   at both ends
         ! - rem_tube_outershell_threshold: threshold for select a flux tube
         !                   to be merged with neighboring tube (h_rad of 
         !                   neighboring tube / h_rad of boundary tube)
@@ -242,28 +241,30 @@ module goatmod_userinput
         !           can be 'pol-rad', i.e. continue poloidal splitting after
         !           the radial split an inclined boundary face
         ! - split_out: option to not split pentagons 
-        ! - splittype: can be 'rad' for radial splitting, i.e. reducing radial 
-        !              width of cells, or 'pol' for poloidal splitting, i.e. 
-        !              reducing the poloidal length of cells
+        ! - splittype: can be:
+        !               1: for radial splitting, i.e. reducing radial width of cells
+        !               2: for poloidal splitting, i.e. reducing the poloidal length of cells
         ! - n_split: number of allowed splitting operations      
         ! - typeT: method to split a triangle, can be 'stacked', i.e. triangle 
         !          is split into two trianlge, or 'cutcell', i.e. triangle is 
         !           split in a quad and a triangle
         ! - rad_type: criterium to apply radial splitting (see SelectSplitCell), can be:
-        !             'h_rad_psi': split cells with large psi width
-        !             'h_rad': split cells with large radial width
-        !             'pol_flux': split cells with large poloidal flux estimation based on 
+        !             1: 'h_rad_psi': split cells with large psi width
+        !             2: 'h_rad': split cells with large radial width
+        !             3: 'pol_flux': split cells with large poloidal flux estimation based on 
         !                           pol_flux_est distance function
-        !             'farSOL': split highly inclined triangles in the farSOL
-        !             'farSOL_refinements': split cells with large psi width in the farSOL
-        !             'farSOLrefinement_targets': split cells with large psi width and 
+        !             4: 'farSOL': split highly inclined triangles in the farSOL
+        !             5: 'farSOL_refinements': split cells with large psi width in the farSOL
+        !             6: 'farSOLrefinement_targets': split cells with large psi width and 
         !                                         low boundary face inclination in the farSOL
+        !             7: 'no_aligned_faces': split cells without aligned faces
+        !             8: 'shaved_off_tubes': split cells in tube which is concavely shaved off
         ! - pol_type: criterium to aplly poloidal splitting (see SelectSplitCell) can be:
-        !                'trias_cvS': split triangles with largest surface area
-        !                'h_pol': split cells with largest poloidal length
-        !                'trias_farSOL': split triangles with largest surface area in the farSOL
-        !                'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
-        !                'farSOLrefinement_targets': split cells in the farSOL with large
+        !                1: 'trias_cvS': split triangles with largest surface area
+        !                2: 'h_pol': split cells with largest poloidal length
+        !                3: 'trias_farSOL': split triangles with largest surface area in the farSOL
+        !                4: 'farSOLrefinement_hpol': split cells with largest poloidal length in the farSOL
+        !                5: 'farSOLrefinement_targets': split cells in the farSOL with large
         !                                   poloidal length and low inclination at the boundary face
         ! - dist_function_threshold_split: threshold for the value the distance function 
         !               for selecting a cell to split. The value should be lower than 
@@ -274,18 +275,18 @@ module goatmod_userinput
         ! - no_hex: to not allow hexagonal cells in the final grid
         ! - merge_crit: criterium to select a face from which the two cell need to be merged
         !               can be (see SelectMergingFace) :
-        !               'tria_to_quad': merging two triangles to quadrilaterals
-        !               'min_area': merging cells which are smaller the mean surface area
-        !               'h_pol': merging cells with too small poloidal length
-        !               'bias': merging based on high bias between cells in poloidal direction
-        !               'pol_flux': merging cells with low poloidal flux estimation via 
+        !               1: 'tria_to_quad': merging two triangles to quadrilaterals
+        !               2: 'min_area': merging cells which are smaller the mean surface area
+        !               3: 'h_pol': merging cells with too small poloidal length
+        !               4: 'bias': merging based on high bias between cells in poloidal direction
+        !               5: 'pol_flux': merging cells with low poloidal flux estimation via 
         !                           similarly named distance function
-        !               'h_rad': merging cells with psi width smaller than h_rad_threshold
-        !               'h_rad_core': merging cells in the core radial width smaller than
+        !               6: 'h_rad': merging cells with psi width smaller than h_rad_threshold
+        !               7: 'h_rad_core': merging cells in the core radial width smaller than
         !                            h_rad_core_threshold
-        !               'bias_rad_farSOL': merging cells with large radial bias in farSOL
-        !               'bias_rad': merging cells with large radial bias
-        !               'skew_tria': merging triangles with low inclination and high aspect ratio
+        !               8: 'bias_rad_farSOL': merging cells with large radial bias in farSOL
+        !               9: 'bias_rad': merging cells with large radial bias
+        !               10: 'skew_tria': merging triangles with low inclination and high aspect ratio
         ! - merge_h_pol_factor: factor to losen merge criterium based on poloidal length
         ! - n_merge: number of merging operations allowed
         ! - merge_bias_limit: thershold on bias to merge the cells. Merge is done when
@@ -316,7 +317,20 @@ module goatmod_userinput
         ! - d_char_type: characteristic length used to construct distance function, can be:
         !               'min_Xpoint_dist': minimal distance between targets and Xpoint
         !               'max_Xpoint_dist': maximal distance between targets and Xpoint
-        ! The rest of the options are carried over from goatoptions or not changeable.
+
+        ! Aposteriori adaptations
+        ! - vxVol_style: style to interpolate from cell centers to vertices
+        ! - apost_interpolation_meth: determines the interpolation method for interpolation, can be 'barycentric' or 'finite_element'
+        ! - apost_interpolationC: level of continuity of interpolant
+        ! - apost_interpolationM: order of interpolant
+        ! - apost_meth: method to chose a cell to refine, can be 'grad'
+        !   from read state and residual information to a newly adapted grid, or 
+        !   can be 'res' to base the adaptation on residual information
+        ! - apost_use_XX: flag to indicate to use a certain state field to decide
+        !   which cells to split
+        ! - apost_lambda_threshold: threshold for length scale per cell width, if length scale 
+        !   per cell width is lower than the threshold, the cell is considered for refinement
+        ! The rest of the options are carried over from goatoptions or are not changeable.
 
         ! General adaptation options
         logical                     :: plt
@@ -327,6 +341,10 @@ module goatmod_userinput
         ! Facelabel mapping
         integer(I8), allocatable    :: facelabelmappingGG(:)
         integer(I8), allocatable    :: facelabelmappingGA(:)
+        integer(I8), allocatable    :: facelabelmappingGD(:)
+        integer(I8), allocatable    :: facelabelsubfrom(:)
+        integer(I8), allocatable    :: facelabelsubto(:)
+
 
         ! Operation options
         logical                     :: rem_small_trias
@@ -347,7 +365,9 @@ module goatmod_userinput
 
 
         logical                     :: splitting
+        integer(I8), allocatable    :: splitting_array(:)
         logical                     :: merging
+        integer(I8), allocatable    :: merging_array(:)
         logical                     :: pents_to_tria
         real(R8)                    :: h_rad_threshold
         real(R8)                    :: h_rad_core_threshold
@@ -355,9 +375,11 @@ module goatmod_userinput
         logical                     :: BLG
         integer(I8)                 :: BLG_n_layers
         real(R8)                    :: BLG_rescaling_factor
+        real(R8), allocatable       :: BLG_smoothing_factors(:)
 
         logical                     :: rem_stickout_trias
-        logical                     :: rem_trias_flux
+        logical                     :: rem_trias_tube
+        logical                     :: rem_outershell
         real(R8)                    :: rem_tube_outershell_threshold
         character(:), allocatable   :: outershell_handling
         logical                     :: rem_stickout_quad
@@ -368,18 +390,24 @@ module goatmod_userinput
         character(:), allocatable   :: QTtype
         logical                     :: split_out
         character(:), allocatable   :: splittype
+        integer(I8), allocatable    :: splittype_array(:)
         integer(I8)                 :: n_split
+        integer(I8), allocatable    :: n_split_array(:)
         character(:), allocatable   :: typeT
-        character(:), allocatable   :: rad_type
-        character(:), allocatable   :: pol_type
+        integer(I8)                 :: rad_type
+        integer(I8), allocatable    :: rad_type_array(:)
+        integer(I8)                 :: pol_type
+        integer(I8), allocatable    :: pol_type_array(:)
         real(R8)                    :: dist_function_threshold_split
         real(R8)                    :: dist_function_threshold_split_wall
         
         ! Merging options
         logical                     :: no_hex
-        character(:), allocatable   :: merge_crit
+        integer(I8)                 :: merge_crit
+        integer(I8), allocatable    :: merge_crit_array(:)
         real(R8)                    :: merge_h_pol_factor 
         integer(I8)                 :: n_merge
+        integer(I8), allocatable    :: n_merge_array(:)
         real(R8)                    :: merge_bias_limit
         real(R8)                    :: dist_function_threshold_merge    
         
@@ -402,6 +430,32 @@ module goatmod_userinput
         character(:), allocatable   :: dist_type_wall
         character(:), allocatable   :: d_char_type
         logical                     :: plt_dist_func  
+
+        ! Aposteriori
+        integer(I8)                 :: vxVol_style
+        character(:), allocatable   :: apost_interpolation_meth
+        integer(I8)                 :: apost_interpolationC
+        integer(I8)                 :: apost_interpolationM
+        character(:), allocatable   :: apost_meth
+        real(R8)                    :: apost_lambda_threshold
+        logical                     :: apost_use_na
+        logical                     :: apost_use_ua
+        logical                     :: apost_use_te
+        logical                     :: apost_use_ti
+        logical                     :: apost_use_tn
+        logical                     :: apost_use_po
+        logical                     :: apost_use_kt
+        logical                     :: apost_use_zt
+        logical                     :: apost_use_resco
+        logical                     :: apost_use_resmo
+        logical                     :: apost_use_resmt
+        logical                     :: apost_use_reshe
+        logical                     :: apost_use_reshi
+        logical                     :: apost_use_reshn
+        logical                     :: apost_use_respo
+        logical                     :: apost_use_reszt
+        logical                     :: apost_use_reskt
+
         
         
         ! Caried over from goatoptions
@@ -409,6 +463,8 @@ module goatmod_userinput
         logical                     :: debug        
         logical                     :: vesselmode
         logical                     :: slab
+        logical                     :: readstate
+        character(:), allocatable   :: readstatemeth    
 
         ! fcRegmappingGA
         integer(I8)                 :: fcRegmappingGA(1:7)
@@ -420,6 +476,8 @@ module goatmod_userinput
 
         ! Splitting
         logical                     :: XpointSplitting
+
+
 
 
     contains
@@ -615,10 +673,15 @@ module goatmod_userinput
         ! Structure used to keep all other possible necessary 
         ! structures that do not immediately fall under the grid, vessel
         ! or magnetic field. Currently empty. 
+        ! - readstate: logical to read state
+        ! - readstatemeth: method to read state, can be 'b2fstate' or 'b2fplasmf'
 
         character(:), allocatable   :: type
         character(:), allocatable   :: filepath
         character(:), allocatable   :: vesselfilepath
+        logical                     :: readstate
+        character(:), allocatable   :: readstatemeth
+        character(:), allocatable   :: statefilepath
 
     contains 
 
@@ -1018,6 +1081,7 @@ module goatmod_userinput
             options%structurefilepath       = './structure.dat'
             options%magneticfieldfilepath   = './rzpsi.dat'
         end if 
+        
 
         ! Output options
         if (solps) then 
@@ -1039,18 +1103,11 @@ module goatmod_userinput
         options%artificial_slab     = .false.
         
         ! Face label mappings
-        allocate(options%GDtoGAfacelabelmappingGG(0), &
-            options%GDtoGAfacelabelmappingGD(0), &
-            options%GDtoGAfacelabelsubfrom(0), &
-            options%GDtoGAfacelabelsubto(0), &
-            options%GGtoGDfacelabelmappingGG(0), &
-            options%GGtoGDfacelabelmappingGD(0), &
-            options%GGtoGDfacelabelsubfrom(0), &
-            options%GGtoGDfacelabelsubto(0), &
-            options%GGtoGAfacelabelmappingGG(0), &
-            options%GGtoGAfacelabelmappingGA(0), &
-            options%GGtoGAfacelabelsubfrom(0), &
-            options%GGtoGAfacelabelsubto(0))
+        allocate(options%facelabelmappingGG(0), &
+            options%facelabelmappingGD(0), &
+            options%facelabelmappingGA(0), &
+            options%facelabelsubfrom(0), &
+            options%facelabelsubto(0))
         
         ! Structure options
         allocate(options%TP(0), options%TPind(0), options%exclude(0))
@@ -1074,7 +1131,7 @@ module goatmod_userinput
         class(GAoptionsUDT)       :: options   
         
         ! General options
-        options%plt         = .true.
+        options%plt         = .false.
         options%plt_qm      = .false.
         options%meth        = 'simple'
 
@@ -1099,20 +1156,24 @@ module goatmod_userinput
         options%split_shaved_off_tube               = .false.
 
         options%splitting                           = .false.
+        options%splitting_array                     = [0]
         options%pents_to_tria                       = .false.
         options%merging                             = .false.
+        options%merging_array                       = [0]
         options%h_rad_threshold                     = 0.01
         options%h_rad_core_threshold                = 0.04
 
         options%BLG                                 = .false.
         options%BLG_n_layers                        = 0
         options%BLG_rescaling_factor                = 2
+        options%BLG_smoothing_factors               = [1.2, 1.5]
 
         options%rem_stickout_trias                  = .false.
-        options%rem_trias_flux                      = .false.
+        options%rem_trias_tube                      = .false.
+        options%rem_outershell                      = .false.
         options%rem_tube_outershell_threshold       = 2
         options%outershell_handling                 = 'merge' 
-        options%rem_stickout_quad                 = .false.
+        options%rem_stickout_quad                   = .false.
         options%split_noalignedquads                = .true. 
         
         ! Splitting options
@@ -1121,23 +1182,26 @@ module goatmod_userinput
         options%split_out                           = .false.
         options%splittype                           = 'rad'
         options%n_split                             = 20
+        options%n_split_array                       = [20]
         options%typeT                               = 'cutcell'
-        options%rad_type                            = 'h_rad'
-        options%pol_type                            = 'trias'
+        options%rad_type                            = 1
+        options%pol_type                            = 1
         options%dist_function_threshold_split       = 0.9
         options%dist_function_threshold_split_wall  = 0.6  
         
         ! Merging options
         options%no_hex                              = .true.
-        options%merge_crit                          = 'h_pol'
+        options%merge_crit                          = 4
+        options%merge_crit_array                    = [4]
         options%merge_h_pol_factor                  = 1
         options%n_merge                             = 20
+        options%n_merge_array                       = [20]
         options%merge_bias_limit                    = 5
         options%dist_function_threshold_merge       = 0.6   
         
         ! Pentagon options
         options%no_pents_area_merge                 = .false.
-        options%no_pents_area_split                 = .true.
+        options%no_pents_area_split                 = .false.
         options%no_pents_area_type                  = 'dist_function'
         
         options%no_pents_area_maxR                  = 2.5
@@ -1154,6 +1218,31 @@ module goatmod_userinput
         options%dist_type_wall                      = 'target_to_vessel'
         options%d_char_type                         = 'min_Xpoint_dist'
         options%plt_dist_func                       = .false.    
+
+        ! Aposteriori
+        options%vxVol_style                         = 2
+        options%apost_interpolation_meth            = 'barycentric'
+        options%apost_interpolationC                = 0
+        options%apost_interpolationM                = 1
+        options%apost_meth                          = 'grad'
+        options%apost_lambda_threshold              = 3
+        options%apost_use_na                        = .false.
+        options%apost_use_ua                        = .false.
+        options%apost_use_te                        = .false.
+        options%apost_use_ti                        = .false.
+        options%apost_use_tn                        = .false.
+        options%apost_use_po                        = .false.
+        options%apost_use_kt                        = .false.
+        options%apost_use_zt                        = .false.
+        options%apost_use_resco                     = .false.
+        options%apost_use_resmo                     = .false.
+        options%apost_use_resmt                     = .false.
+        options%apost_use_reshe                     = .false.
+        options%apost_use_reshi                     = .false.
+        options%apost_use_reshn                     = .false.
+        options%apost_use_respo                     = .false.
+        options%apost_use_reszt                     = .false.
+        options%apost_use_reskt                     = .false.
 
     end subroutine
 
@@ -1201,12 +1290,14 @@ module goatmod_userinput
         options%filepath            = 'traduit.out.b2us'
 
         ! Default mappings
-        allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
-        allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
+        if (.not.allocated(options%facelabelsubfrom)) &
+            allocate(options%facelabelsubfrom(0), options%facelabelsubto(0))
+        if (.not.allocated(options%facelabelmappingGG)) &
+            allocate(options%facelabelmappingGG(1:8), options%facelabelmappingGD(1:8), &
         options%facelabelmappingGA(1:8))
         options%facelabelmappingGG = [-13, -34, -23, -24, -21, -42, -43, -44]
         options%facelabelmappingGD = [1, 2, 3,   3,   4,   5,   5,   5]
-        options%facelabelmappingGD = [4, 5, 3,   3,   2,   3,   3,   3]        
+        options%facelabelmappingGA = [4, 5, 3,   3,   2,   3,   3,   3]        
 
     
     end subroutine
@@ -1296,6 +1387,18 @@ module goatmod_userinput
         !============
         options%type = 'vessel'
         options%vesselfilepath = options%inputfilepath
+
+        ! Carry over some goatoptions to environmentoptions
+        options%readstate       = .false.
+        options%readstatemeth   = 'b2fplasmf'
+        
+        ! Specify input filename
+        if (solps) then
+            ! SOLPS default
+            options%statefilepath           = solps_statefilepath
+        else
+            options%statefilepath           = './b2fplasmf'
+        end if
 
         ! Set data
 
@@ -1606,44 +1709,21 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%artificial_slab)
 
         ! Face label mappings
-        field = 'goat.GDtoGA.facelabelmappingGG'
+        field = 'goat.facelabelmappingGG'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelmappingGG)
-        field = 'goat.GDtoGA.facelabelmappingGD'
+            options%facelabelmappingGG)
+        field = 'goat.facelabelmappingGD'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelmappingGD) 
-        field = 'goat.GDtoGA.facelabelsubfrom'
+            options%facelabelmappingGD) 
+        field = 'goat.facelabelmappingGA'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelsubfrom)
-        field = 'goat.GDtoGA.facelabelsubto'
+            options%facelabelmappingGA) 
+        field = 'goat.facelabelsubfrom'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GDtoGAfacelabelsubto)
-
-        field = 'goat.GGtoGD.facelabelmappingGG'
+            options%facelabelsubfrom)
+        field = 'goat.facelabelsubto'
         call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelmappingGG)
-        field = 'goat.GGtoGD.facelabelmappingGD'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelmappingGD)
-        field = 'goat.GGtoGD.facelabelsubfrom'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelsubfrom)
-        field = 'goat.GGtoGD.facelabelsubto'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGDfacelabelsubto)
-
-        field = 'goat.GGtoGA.facelabelmappingGG'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelmappingGG)
-        field = 'goat.GGtoGA.facelabelmappingGA'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelmappingGA)
-        field = 'goat.GGtoGA.facelabelsubfrom'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelsubfrom)
-        field = 'goat.GGtoGA.facelabelsubto'
-        call ExtractOptionValueInteger1D(fid, field, &
-            options%GGtoGAfacelabelsubto)    
+            options%facelabelsubto)
 
         ! OMP and IMP
         field = 'goat.OMP_r'
@@ -1694,9 +1774,8 @@ module goatmod_userinput
 
         end if 
 
-
         ! Other checks
-        if (size(options%GGtoGAfacelabelmappingGG)/=size(options%GGtoGAfacelabelmappingGA)) then 
+        if (size(options%facelabelmappingGG)/=size(options%facelabelmappingGA)) then 
             call gdErrorHandler('ReadGOAToptions: facelabelmapping has inconsistent lengths')
         end if 
 
@@ -1796,11 +1875,11 @@ module goatmod_userinput
                
         ! Splitting and merging
         field = 'ga.splitting'
-        call ExtractOptionValueLogical0D(fid, field, options%splitting)    
+        call ExtractOptionValueInteger1D(fid, field, options%splitting_array)    
         field = 'ga.pents_to_tria' 
         call ExtractOptionValueLogical0D(fid, field, options%pents_to_tria)
         field = 'ga.merging'
-        call ExtractOptionValueLogical0D(fid, field, options%merging)
+        call ExtractOptionValueInteger1D(fid, field, options%merging_array)
         field = 'ga.h_rad_threshold'
         call ExtractOptionValueReal0D(fid, field, options%h_rad_threshold)                
         field = 'ga.h_rad_core_threshold'
@@ -1811,14 +1890,18 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%BLG)
         field = 'ga.BLG_n_layers'
         call ExtractOptionValueInteger0D(fid, field, options%BLG_n_layers)
-        field = 'ga.rescaling_factor'
+        field = 'ga.BLG_rescaling_factor'
         call ExtractOptionValueReal0D(fid, field, options%BLG_rescaling_factor)
+        field = 'ga.BLG_smoothing_factors'
+        call ExtractOptionValueReal1D(fid, field, options%BLG_smoothing_factors)
 
         ! Special operations
         field = 'ga.rem_stickout_trias'
         call ExtractOptionValueLogical0D(fid, field, options%rem_stickout_trias)        
-        field = 'ga.rem_trias_flux'
-        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_flux)        
+        field = 'ga.rem_trias_tube'
+        call ExtractOptionValueLogical0D(fid, field, options%rem_trias_tube)
+        field = 'ga.rem_outershell'   
+        call ExtractOptionValueLogical0D(fid, field, options%rem_outershell)
         field = 'ga.rem_tube_outershell_threshold'
         call ExtractOptionValueReal0D(fid, field, options%rem_tube_outershell_threshold)  
         field = 'ga.outershell_handling'
@@ -1837,15 +1920,15 @@ module goatmod_userinput
         field = 'ga.split_out'
         call ExtractOptionValueLogical0D(fid, field, options%split_out)
         field = 'ga.splittype'
-        call ExtractOptionValueCharacter(fid, field, options%splittype)
+        call ExtractOptionValueInteger1D(fid, field, options%splittype_array)
         field = 'ga.n_split'
-        call ExtractOptionValueInteger0D(fid, field, options%n_split)
+        call ExtractOptionValueInteger1D(fid, field, options%n_split_array)
         field = 'ga.typeT'
         call ExtractOptionValueCharacter(fid, field, options%typeT)                                   
         field = 'ga.rad_type'
-        call ExtractOptionValueCharacter(fid, field, options%rad_type)                                   
+        call ExtractOptionValueInteger1D(fid, field, options%rad_type_array)                                   
         field = 'ga.pol_type'
-        call ExtractOptionValueCharacter(fid, field, options%pol_type)
+        call ExtractOptionValueInteger1D(fid, field, options%pol_type_array)
         field = 'ga.dist_function_threshold_split'
         call ExtractOptionValueReal0D(fid, field, options%dist_function_threshold_split)                                    
         field = 'ga.dist_function_threshold_split_wall'
@@ -1856,11 +1939,11 @@ module goatmod_userinput
         field = 'ga.no_hex'
         call ExtractOptionValueLogical0D(fid, field, options%no_hex)
         field = 'ga.merge_crit'
-        call ExtractOptionValueCharacter(fid, field, options%merge_crit) 
+        call ExtractOptionValueInteger1D(fid, field, options%merge_crit_array) 
         field = 'ga.merge_h_pol_factor'
         call ExtractOptionValueReal0D(fid, field, options%merge_h_pol_factor)
         field = 'ga.n_merge'
-        call ExtractOptionValueInteger0D(fid, field, options%n_merge)
+        call ExtractOptionValueInteger1D(fid, field, options%n_merge_array)
         field = 'ga.merge_bias_limit'
         call ExtractOptionValueReal0D(fid, field, options%merge_bias_limit)        
         field = 'ga.dist_function_threshold_merge'
@@ -1902,6 +1985,53 @@ module goatmod_userinput
         call ExtractOptionValueCharacter(fid, field, options%d_char_type)
         field = 'ga.plt_dist_func'
         call ExtractOptionValueLogical0D(fid, field, options%plt_dist_func)
+
+        ! Aposteriori
+        !============
+        field = 'ga.vxvol_style'
+        call ExtractOptionValueInteger0D(fid, field, options%vxVol_style)
+        field = 'ga.apost_interpolation_meth'
+        call ExtractOptionValueCharacter(fid, field, options%apost_interpolation_meth)
+        field = 'ga.apost_interpolationC'
+        call ExtractOptionValueInteger0D(fid, field, options%apost_interpolationC)        
+        field = 'ga.apost_interpolationM'
+        call ExtractOptionValueInteger0D(fid, field, options%apost_interpolationM)                
+        field = 'ga.apost_meth'
+        call ExtractOptionValueCharacter(fid, field, options%apost_meth)
+        field = 'ga.apost_use_na'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_na)
+        field = 'ga.apost_use_ua'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_ua)
+        field = 'ga.apost_use_te'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_te)
+        field = 'ga.apost_use_ti'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_ti)
+        field = 'ga.apost_use_tn'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_tn)
+        field = 'ga.apost_use_po'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_po)
+        field = 'ga.apost_use_kt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_kt)
+        field = 'ga.apost_use_zt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_zt)
+        field = 'ga.apost_use_resco'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_resco)
+        field = 'ga.apost_use_resmo'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_resmo)
+        field = 'ga.apost_use_resmt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_resmt)
+        field = 'ga.apost_use_reshe'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reshe)
+        field = 'ga.apost_use_reshi'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reshi)
+        field = 'ga.apost_use_reshn'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reshn)
+        field = 'ga.apost_use_respo'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_respo)
+        field = 'ga.apost_use_reskt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reskt)
+        field = 'ga.apost_use_reszt'
+        call ExtractOptionValueLogical0D(fid, field, options%apost_use_reszt)
 
         ! Housekeeping
         !=============
@@ -2211,7 +2341,8 @@ module goatmod_userinput
         class(EnvironmentOptionsUDT)    :: options 
 
         ! Auxiliary
-        integer                         :: openstatus 
+        integer                         :: openstatus
+        character(:), allocatable       :: field 
         integer, parameter              :: fid = 10 
         logical                         :: reachedeof
 
@@ -2237,7 +2368,12 @@ module goatmod_userinput
         
         ! Read options
         !=============
-        ! Nothing to be read in currently
+        field = 'goat.statefilepath'
+        call ExtractOptionValueCharacter(fid, field, options%statefilepath)        
+        field = 'goat.readstate'
+        call ExtractOptionValueLogical0D(fid, field, options%readstate)
+        field = 'goat.readstatemeth'
+        call ExtractOptionValueCharacter(fid, field, options%readstatemeth)
 
         ! Housekeeping
         !=============

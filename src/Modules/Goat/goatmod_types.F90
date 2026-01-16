@@ -471,6 +471,10 @@ module goatmod_types
         ! Boundaries
         type(BndUDT), allocatable           :: bnd(:)
 
+    contains
+
+        procedure  :: WriteData         => WriteGridData
+
     end type
 
     !------------------------------------------------------------------!
@@ -597,6 +601,46 @@ module goatmod_types
 
     end type
 
+    ! State 
+    type StateUDT
+
+        ! Description
+        !============
+        ! User defined type containing simulation data (SOLPS-ITER) on the given grid
+        ! The following field are present:
+        !
+        ! - na:     ion density
+        ! - ne:     electron density
+        ! - ua:     parallel velocity
+        ! - uadia:  diamagnetic velocity
+        ! - te:     electron density
+        ! - ti:     ion temperature
+        ! - tn:     neutral temperature
+        ! - po:     potential
+        ! - kt:     ??
+        ! - zt:     ??
+
+        ! - resco:  residual of continuity equation
+        ! - reshe:  residual of electron temperature equation
+        ! - reshi:  residual of ion temperature equation
+        ! - reshn:  residual of neutral temperature equation
+        ! - resmo:  residual of ion momentum equation
+        ! - resmt:  residual of total momentum equation
+        ! - respo:  residual of potential equation
+        ! - reskt:  ??
+        ! - reszt:  ??
+
+        ! State 
+        integer(I8)                         :: nc, nf, ns
+        real(R8), allocatable               :: na(:,:), ne(:), ua(:,:), uadia(:,:,:), & 
+                                                te(:), ti(:), tn(:), po(:), kt(:), zt(:)
+
+        ! Residual
+        real(R8), allocatable               :: resco (:,:), reshe(:), reshi(:), reshn(:), &
+                                                resmo(:,:), resmt(:), respo(:), reskt(:), reszt(:)
+
+    end type
+
     ! Vessel
     !=======
     type VesselUDT
@@ -657,14 +701,14 @@ module goatmod_types
         !============
         ! Overarching type that stores all other structures etc which 
         ! may be needed for grid optimization, and which are not 
-        ! related to the grid or the magnetic field. Currently, only
-        ! the vessel structure is stored here. 
+        ! related to the grid or the magnetic field.
 
         ! Note: the routine to set up the vessel is currently a 
         ! standalone routine. Should we include it here as a 
         ! method of the vessel structure?
 
         type(VesselUDT)                 :: vessel
+        type(StateUDT)                  :: SOLPSstate    
 
     contains
 
@@ -1281,8 +1325,13 @@ module goatmod_types
         real(R8), allocatable       :: fsdummyr(:) ! dummy array
         real(R8), allocatable       :: facedummy(:) ! dummy array
         integer(I8), allocatable       :: n2dummy(:) ! dummy array
-        integer(I8), allocatable       :: nxdummy(:) ! dummy array
-    
+        integer(I8), allocatable       :: nxdummy(:) ! dummy array        
+        real(R8), allocatable       :: vx(:), vy(:), vxbx(:), vxby(:), &
+            vffbz(:), vpsi(:)
+        integer(I8), allocatable    :: vfieldlineID(:), vface(:), &
+            vcell(:), vcell1(:), cellft(:), cellreg(:), &
+            ftcells(:), cellv(:), cellf(:)
+        logical, allocatable        :: vBV(:)
         integer(I8)                 :: n2,nx  ! legacy structured data
     
         integer(I8)                                 :: ngv, ngc 
@@ -1298,6 +1347,9 @@ module goatmod_types
         ! Loop
         integer(I8)                 :: i, j, k
         
+        ! Data
+        data filespec /60/
+        
         ! Read (inlucding guard cells)
         !=============================
         ! Open the file
@@ -1307,7 +1359,7 @@ module goatmod_types
         ! First, read the header with the version - just skip it...
         call ReadSingleLine(filespec, chardummy2, reachedeof)
         if (reachedeof) then 
-            call gdErrorHandler('ReadTraduitUS: reached EOF prematurely')
+            call gdErrorHandler('ReadB2fgmtryUS: reached EOF prematurely')
         end if 
     
         ! Primary array dimensions
@@ -1335,7 +1387,14 @@ module goatmod_types
     
         ! Allocate grid
         call AllocateGrid(grid)
-    
+
+        ! Allocate
+        allocate(grid%data%xpointID(0), grid%data%opointID(0), &
+                grid%data%spointID(0), grid%data%isprimaryxp(0), &
+                grid%data%divFcP(0, 2), grid%data%divFc(0), &
+                grid%data%spointdivID(0), grid%data%tpointdivID(0), &
+                grid%data%sepID(0))
+
         ! Check
         if (.not. allocated(grid%vert%face)) then 
             allocate(grid%vert%face(grid%vert%nface))
@@ -1443,8 +1502,7 @@ module goatmod_types
         elsewhere
             grid%face%aligned = 0
         end where
-    
-    
+
         ! vertex quantities - only keep coordinates (and ffbz)
         call cfrure (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
         call cfrure (filespec, nv,   grid%vert%x,    'vxX')
@@ -1491,14 +1549,29 @@ module goatmod_types
     
         ! Rebuild vertex fields
         grid%vert%ntot = grid%vert%ntot - ngv
-        grid%vert%x = pack(grid%vert%x, isnoghostvert)
-        grid%vert%y = pack(grid%vert%y, isnoghostvert)
-        grid%vert%fieldlineID = pack(grid%vert%fieldlineID, isnoghostvert)
-        grid%vert%bx = pack(grid%vert%bx, isnoghostvert)
-        grid%vert%by = pack(grid%vert%by, isnoghostvert)
-        grid%vert%BV = pack(grid%vert%BV, isnoghostvert)
-        grid%vert%ffbz = pack(grid%vert%ffbz, isnoghostvert)
-        grid%vert%psi = pack(grid%vert%psi, isnoghostvert)
+        vx = grid%vert%x
+        vy = grid%vert%y
+        vfieldlineID = grid%vert%fieldlineID
+        vxbx = grid%vert%bx
+        vxby = grid%vert%by
+        vBV = grid%vert%BV
+        vffbz = grid%vert%ffbz
+        vpsi = grid%vert%psi
+        deallocate(grid%vert%x, grid%vert%y, grid%vert%fieldlineID, grid%vert%bx, &
+        grid%vert%by, grid%vert%BV, grid%vert%ffbz, grid%vert%psi)
+        allocate(grid%vert%x(grid%vert%ntot), grid%vert%y(grid%vert%ntot), &
+        grid%vert%fieldlineID(grid%vert%ntot), grid%vert%bx(grid%vert%ntot), &
+        grid%vert%by(grid%vert%ntot), grid%vert%BV(grid%vert%ntot), &
+        grid%vert%ffbz(grid%vert%ntot), grid%vert%psi(grid%vert%ntot))
+
+        grid%vert%x = pack(vx, isnoghostvert)
+        grid%vert%y = pack(vy, isnoghostvert)
+        grid%vert%fieldlineID = pack(vfieldlineID, isnoghostvert)
+        grid%vert%bx = pack(vxbx, isnoghostvert)
+        grid%vert%by = pack(vxby, isnoghostvert)
+        grid%vert%BV = pack(vBV, isnoghostvert)
+        grid%vert%ffbz = pack(vffbz, isnoghostvert)
+        grid%vert%psi = pack(vpsi, isnoghostvert)
         if (allocated(grid%vert%neigP)) then 
             deallocate(grid%vert%neigP)
             allocate(grid%vert%neigP(grid%vert%ntot, 2))
@@ -1549,8 +1622,12 @@ module goatmod_types
             grid%vert%faceP(i, 1) = grid%vert%faceP(i-1, 1) + grid%vert%faceP(i-1, 2)
             grid%vert%cellP(i, 1) = grid%vert%cellP(i-1, 1) + grid%vert%cellP(i-1, 2)
         end do 
-        grid%vert%face = pack(grid%vert%face, keepvertface)
-        grid%vert%cell = pack(grid%vert%cell, keepvertcell)
+        vface = grid%vert%face
+        vcell = grid%vert%cell
+        deallocate(grid%vert%face, grid%vert%cell)
+        allocate(grid%vert%face(count(keepvertface)), grid%vert%cell(count(keepvertcell)))
+        grid%vert%face = pack(vface, keepvertface)
+        grid%vert%cell = pack(vcell, keepvertcell)
         grid%vert%nface = size(grid%vert%face)
         grid%vert%ncell = size(grid%vert%cell)
     
@@ -1578,24 +1655,43 @@ module goatmod_types
         end do
     
         ! Rebuild vertex fields
-        grid%vert%cell = pack(grid%vert%cell, isnoguardcell(grid%vert%cell))
+        vcell1 = grid%vert%cell
+        deallocate(grid%vert%cell)
+        allocate(grid%vert%cell(count(isnoguardcell(vcell1))))
+        grid%vert%cell = pack(vcell1, isnoguardcell(vcell1))
         grid%vert%cell = cellmap(grid%vert%cell)
     
         ! Rebuild face fields (nothing to be done)
     
         ! Rebuild cell fields
         grid%cell%ntot = grid%cell%ntot - ngc 
-        grid%cell%ft = pack(grid%cell%ft, isnoguardcell)
-        grid%cell%reg = pack(grid%cell%reg, isnoguardcell)
+        cellft = grid%cell%ft
+        cellreg = grid%cell%reg
+        deallocate(grid%cell%ft, grid%cell%reg, grid%cell%psi, grid%cell%bp, &
+            grid%cell%bt, grid%cell%x, grid%cell%y, grid%cell%cflags)
+        allocate(grid%cell%ft(count(isnoguardcell)), grid%cell%reg(count(isnoguardcell)), grid%cell%psi(grid%cell%ntot), &
+            grid%cell%bp(grid%cell%ntot), grid%cell%bt(grid%cell%ntot), grid%cell%x(grid%cell%ntot), grid%cell%y(grid%cell%ntot), &
+            grid%cell%cflags(grid%cell%ntot))
+        grid%cell%ft = pack(cellft, isnoguardcell)
+        grid%cell%reg = pack(cellreg, isnoguardcell)
+        grid%cell%psi = 0
+        grid%cell%bp = 0
+        grid%cell%bt = 0
+        grid%cell%x = 0
+        grid%cell%y = 0 
+        grid%cell%cflags = 0
+        
         
         ! Rebuild flux tube data
+        ftcells = grid%data%fluxdata%fluxtubecells
+        deallocate(grid%data%fluxdata%fluxtubecells)
+        allocate(grid%data%fluxdata%fluxtubecells(count(ftcells /= 0)))
+        grid%data%fluxdata%fluxtubecells = pack(ftcells, ftcells /= 0)        
         grid%data%fluxdata%fluxtubecells = cellmap(grid%data%fluxdata%fluxtubecells)
         do i = 1, grid%data%fluxdata%nft 
             tftc = GetFTCell(grid%data%fluxdata, i)
             grid%data%fluxdata%fluxtubecellsP(i, 2) = grid%data%fluxdata%fluxtubecellsP(i, 2) - count(tftc == 0)
         end do 
-        grid%data%fluxdata%fluxtubecells = &
-            pack(grid%data%fluxdata%fluxtubecells, grid%data%fluxdata%fluxtubecells /= 0)
         grid%data%fluxdata%fluxtubecellsP(1, 1) = 1
         grid%data%fluxdata%fluxtubefacesP(1, 1) = 1 ! hedge for junk here from input
         do i = 2, grid%data%fluxdata%nft 
@@ -1632,8 +1728,12 @@ module goatmod_types
             grid%cell%faceP(i, 1) = grid%cell%faceP(i-1, 1) + grid%cell%faceP(i-1, 2)
             grid%cell%vertP(i, 1) = grid%cell%vertP(i-1, 1) + grid%cell%vertP(i-1, 2)
         end do 
-        grid%cell%face = pack(grid%cell%face, keepcellface)
-        grid%cell%vert = pack(grid%cell%vert, keepcellvert)
+        cellf = grid%cell%face
+        cellv = grid%cell%vert
+        deallocate(grid%cell%face, grid%cell%vert)
+        allocate(grid%cell%face(count(keepcellface)), grid%cell%vert(count(keepcellvert)))
+        grid%cell%face = pack(cellf, keepcellface)
+        grid%cell%vert = pack(cellv, keepcellvert)
         grid%cell%nface = size(grid%cell%face)
         grid%cell%nvert = size(grid%cell%vert)
     
@@ -2224,6 +2324,138 @@ module goatmod_types
         end associate
 
         ! Close file
+        close(fu)
+
+    end subroutine
+
+    subroutine WriteGridData(grid, filename)
+
+        ! Description
+        !============
+        ! Writing out the GridUDT to plot it.
+
+        ! 'vertices'
+        ! <vert%ntot>
+        ! 'ID, x, y'
+        ! <ID, x, y>
+        ! 'faces'
+        ! <face%ntot> 
+        ! 'ID, v1, v2, label'
+        ! <ID, v1, v2, label>
+        ! 'cells'
+        ! <cell%ntot, cell%nvert> 
+        ! 'ID, vp1, vp2, region>'
+        ! <ID, vp1, vp2, region>
+        ! 'cell vertices'
+        ! <cell%vert> 
+
+        ! Declare variables
+        !==================
+        ! Modules 
+        use mod_plotter 
+        use mod_specialchars, only : filesepchar
+
+
+        ! Arguments
+        class(GridUDT)                        :: grid
+        character(*), intent(in)                :: filename 
+
+        ! Auxiliary
+        integer                                 :: fu
+        real(R8), allocatable, dimension(:)     :: x, y, cx, cy
+        integer(I8), allocatable, dimension(:)  :: v1, v2, region, &   
+            label, vc, aligned
+        character(:), allocatable               :: dir
+
+        ! Loop
+        integer(I8)                             :: i
+
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            f       => grid%face,   &
+            c       => grid%cell,   &
+            v       => grid%vert    &
+        )
+
+        ! Construct writing directory
+        dir = plotdir // filesepchar // filename // '.dat'
+
+        ! Open file
+        open (action='write', file=trim(dir), newunit=fu, &
+             status='unknown')
+
+        ! Write header
+        write(fu, *) 'VERSION3.00.00'
+
+        ! Write vertex data
+        !==================
+        ! Unpack
+        x = v%x
+        y = v%y
+
+        ! Number of vertices
+        write (fu, *) 'vertices'
+        write (fu, *) v%ntot 
+
+        ! Vertex data
+        write (fu, *) 'ID, x, y'
+        do i = 1, v%ntot 
+            write (fu, *) i, x(i), y(i)
+        end do 
+
+        ! Write face data
+        !================
+        ! Unpack
+        v1 = f%vert(:,1)
+        v2 = f%vert(:,2)
+        label = f%label
+        aligned = f%aligned
+
+        ! Number of faces
+        write (fu, *) 'faces'
+        write (fu, *) f%ntot
+
+        ! Face data
+        write (fu, *) 'ID, v1, v2, label, aligned'
+        do i = 1, f%ntot
+            write (fu, *) i, v1(i), v2(i), label(i), aligned(i)
+        end do 
+
+        ! Write cell data
+        !================
+        ! Unpack
+        vc = c%vert
+        v1 = c%vertP(:,1)
+        v2 = c%vertP(:,2)
+        region = c%reg
+        cx = c%x
+        cy = c%y
+
+        ! Number of cells
+        write (fu, *) 'cells'
+        write (fu, *) c%ntot, size(vc)
+
+        ! Cell data
+        write (fu, *) 'ID, vp1, vp2, region, x, y'
+        do i = 1, c%ntot
+            write (fu, *) i, v1(i), v2(i), region(i), cx(i), cy(i)
+        end do 
+
+        ! Cell vertices
+        write (fu, *) 'cell vertices'
+        do i = 1, size(vc)
+            write (fu, *) vc(i)
+        end do 
+
+        ! Housekeeping
+        !=============
+        ! Deallocate again
+
+        ! Others
+        end associate
         close(fu)
 
     end subroutine
@@ -2904,6 +3136,7 @@ module goatmod_types
         call DeallocateFaces(grid%face)
         call DeallocateCells(grid%cell)
         call DeallocateGridData(grid%data)
+        deallocate(grid%bnd)
 
     end subroutine
 
@@ -4585,6 +4818,305 @@ module goatmod_types
     end subroutine
 
     !------------------------------------------------------------------!
+    !                               State                              !
+    !------------------------------------------------------------------!
+
+    ! State
+    !======
+    subroutine AllocateState(state, nc, nf, ns)
+
+        ! Description
+        !============
+        ! Allocate state field
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(StateUDT), intent(inout)   :: state
+        integer(I8), intent(in)         :: nc, nf, ns
+
+        if (.not.allocated(state%na)) then
+
+            ! State variables
+            state%nc = nc
+            state%nf = nf
+            state%ns = ns
+            allocate(state%na(nc, ns))
+            allocate(state%ne(nc))
+            allocate(state%ua(nc, ns))
+            allocate(state%uadia(nf, 2, ns))
+            allocate(state%te(nc))
+            allocate(state%ti(nc))
+            allocate(state%tn(nc))
+            allocate(state%po(nc))
+            allocate(state%kt(nc))
+            allocate(state%zt(nc))
+            state%na = 0.0_R8
+            state%ne = 0.0_R8
+            state%ua = 0.0_R8
+            state%uadia = 0.0_R8
+            state%te = 0.0_R8
+            state%ti = 0.0_R8
+            state%tn = 0.0_R8
+            state%po = 0.0_R8
+            state%kt = 0.0_R8
+            state%zt = 0.0_R8
+
+            ! Residuals
+            allocate(state%resco(nc, ns))
+            allocate(state%resmo(nc, ns))
+            allocate(state%resmt(nc))
+            allocate(state%reshe(nc))
+            allocate(state%reshi(nc))
+            allocate(state%reshn(nc))
+            allocate(state%respo(nc))
+            allocate(state%reskt(nc))
+            allocate(state%reszt(nc))
+            state%resco = 0.0_R8
+            state%resmo = 0.0_R8
+            state%resmt = 0.0_R8
+            state%reshe = 0.0_R8
+            state%reshi = 0.0_R8
+            state%reshn = 0.0_R8
+            state%respo = 0.0_R8
+            state%reskt = 0.0_R8
+            state%reszt = 0.0_R8
+
+        end if
+    end subroutine
+    ! Main reader
+    subroutine ReadState(state, options)
+
+        ! Description
+        !============
+        ! Read in the state data. 
+
+        ! Declare variables
+        !==================
+        type(StateUDT)                  :: state
+        type(EnvironmentOptionsUDT)     :: options 
+        
+        ! Loop variables
+    
+        ! Auxiliary variables
+    
+        ! Main program
+        !=============
+        ! Open the file
+        if (options%readstate) then 
+            
+            ! Check how to read the file
+            select case (options%readstatemeth)
+
+            case ('b2fstate')
+
+                ! Read b2fstate file
+                call ReadB2fstate(state, options%statefilepath)
+
+            case ('b2fplasmf')
+
+                ! Read b2fplasmf file
+                call ReadB2fplasmf(state, options%statefilepath)
+
+            case default
+
+                ! Unknown reading method, throw error
+                call gdErrorHandler('ReadState: unknown reading method') 
+
+            end select
+
+        end if
+
+    end subroutine
+
+    ! Specific readers
+    subroutine ReadB2fstate(state, filepath)
+
+        ! Description
+        !============
+        ! Reading b2fstate file to extract state information
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(StateUDT), intent(inout)   :: state
+        character(:), allocatable       :: filepath    
+
+        ! Auxiliary
+        integer(I8) :: nc, nf, ns, filespec, idum(0:9)
+        character(:), allocatable   :: chardummy   ! dummy array
+        logical :: reachedeof
+
+        ! Data
+        data filespec /60/
+
+        ! Read grid dimensions & allocate
+        !================================
+        ! Open the file
+        print *, 'reading state from file: ' // filepath
+        open(unit = filespec, file = filepath)
+
+        ! First, read the header with the version
+        call ReadSingleLine(filespec, chardummy, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadB2fstate: reached EOF prematurely')
+        end if  
+        
+        ! Check the version to determine what to read in
+        if (chardummy(8:17) >= '03.002.000') then
+
+            ! Primary array dimensions
+            call cfruin (filespec,3,idum,'nCv,nFc,ns')
+            nc = idum(0) ! note: only reading in actual cells, no guard cells
+            nf = idum(1)
+            ns = idum(2)
+
+        else
+
+            call gdErrorHandler('ReadState: structured format not supported')
+
+        end if
+
+        ! Allocate state based on that information
+        call AllocateState(state, nc, nf, ns)
+
+        ! Read charges - not needed
+        !call cfrure(filespec, state%zamin)
+
+        ! Read state variables
+        !---------------------
+        call ReadUntilFound(filespec, 'na', reachedeof)
+        if (reachedeof) then
+            ! Not found, issue warning and rewind
+            print *, 'ReadState: could not find field "na", setting to zero'
+            rewind(filespec)
+        else 
+            ! Found, read state
+            backspace(filespec)
+            call cfrure(filespec, nc*ns,    state%na, 'na')
+            call cfrure(filespec, nc,       state%ne, 'ne')
+            call cfrure(filespec, nc*ns,    state%ua, 'ua')
+            call cfrure(filespec, nf*2*ns,  state%uadia, 'uadia')
+            call cfrure(filespec, nc,       state%te, 'te')
+            call cfrure(filespec, nc,       state%ti, 'ti')
+            call cfrure(filespec, nc,       state%tn, 'tn')
+            call cfrure(filespec, nc,       state%po, 'po')
+            call cfrure(filespec, nc,       state%kt, 'kt')
+            call cfrure(filespec, nc,       state%zt, 'zt')
+            
+        end if
+
+        ! Read residuals
+        !---------------
+        print *, 'ReadState: reading from b2fstate file, so no residuals'
+
+        ! Housekeeping
+        close(filespec)
+
+    end subroutine
+
+    subroutine ReadB2fplasmf(state, filepath)
+
+        ! Description
+        !============
+        ! Read b2fplasmf file to extract state information
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        type(StateUDT), intent(inout)   :: state
+        character(:), allocatable       :: filepath 
+
+        ! Auxiliary
+        integer(I8) :: nc, nf, ns, filespec, idum(0:9)
+        character(:), allocatable   :: chardummy   ! dummy array
+        logical :: reachedeof
+
+        ! Data
+        data filespec /60/
+
+        ! Read grid dimensions & allocate
+        !================================
+        ! Open the file
+        print *, 'reading state from file: ' // filepath
+        open(unit = filespec, file = filepath)
+
+        ! First, read the header with the version
+        call ReadSingleLine(filespec, chardummy, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadB2fstate: reached EOF prematurely')
+        end if  
+        
+        ! Check the version to determine what to read in
+        if (chardummy(8:17) >= '03.002.000') then
+
+            ! Primary array dimensions
+            call cfruin (filespec,3,idum,'nCv,nFc,ns')
+            nc = idum(0) ! note: only reading in actual cells, no guard cells
+            nf = idum(1)
+            ns = idum(2)
+
+        else
+
+            call gdErrorHandler('ReadState: structured format not supported')
+
+        end if
+
+        ! Allocate state based on that information
+        call AllocateState(state, nc, nf, ns)
+
+        ! Read state variables
+        !---------------------
+        call ReadUntilFound(filespec, 'na', reachedeof)
+        if (reachedeof) then
+            ! Not found, issue warning and rewind
+            print *, 'ReadState: could not find field "na", setting to zero'
+            rewind(filespec)
+        else 
+            ! Found, read state
+            backspace(filespec)
+            call cfrure(filespec, nc*ns,    state%na, 'na')
+            call cfrure(filespec, nc,       state%ne, 'ne')
+            call cfrure(filespec, nc*ns,    state%ua, 'ua')
+            call cfrure(filespec, nf*2*ns,  state%uadia, 'uadia')
+            call cfrure(filespec, nc,       state%te, 'te')
+            call cfrure(filespec, nc,       state%ti, 'ti')
+            call cfrure(filespec, nc,       state%tn, 'tn')
+            call cfrure(filespec, nc,       state%po, 'po')
+            call cfrure(filespec, nc,       state%kt, 'kt')
+            call cfrure(filespec, nc,       state%zt, 'zt')
+
+        end if   
+        
+        ! Read residuals
+        !---------------
+        call ReadUntilFound(filespec, 'resco', reachedeof)
+        if (reachedeof) then
+            ! Not found, issue warning and rewind
+            print *, 'ReadState: could not find field "resco", setting to zero'
+            rewind(filespec)
+        else
+
+            ! Found, read residuals
+            backspace(filespec)            
+            call cfrure(filespec, nc*ns,    state%resco, 'resco')
+            call cfrure(filespec, nc,       state%reshe, 'reshe')
+            call cfrure(filespec, nc,       state%reshi, 'reshi')
+            call cfrure(filespec, nc,       state%reshn, 'reshn')
+            call cfrure(filespec, nc*ns,    state%resmo, 'resmo')
+            call cfrure(filespec, nc,       state%resmt, 'resmt')
+            call cfrure(filespec, nc,       state%respo, 'respo')
+            call cfrure(filespec, nc,       state%reskt, 'reskt')
+            call cfrure(filespec, nc,       state%reszt, 'reszt')
+
+        endif
+
+        ! Housekeeping
+        close(filespec)
+
+    end subroutine
+
+    !------------------------------------------------------------------!
     !                            Environment                           !
     !------------------------------------------------------------------!
     ! Environment
@@ -4603,7 +5135,7 @@ module goatmod_types
     
         ! Notes
         !======
-        ! Right now, only the vessel is added.
+        ! The vessel is added and also state information for a simulation.
     
         ! The usual
         implicit none 
@@ -4649,6 +5181,9 @@ module goatmod_types
             call gdErrorHandler('Unknown environment type')
     
         end select
+
+        ! State information
+        call ReadState(environment%SOLPSstate, environmentoptions)
     
     end subroutine
 
@@ -7088,13 +7623,17 @@ module goatmod_types
         call mfoptions%Set()
     
         ! Reset label mappings for grid options
-        gridoptions%facelabelmappingGD      = options%GGtoGDfacelabelmappingGD
-        gridoptions%facelabelmappingGG      = options%GGtoGDfacelabelmappingGG
-        gridoptions%facelabelsubfrom        = options%GGtoGDfacelabelsubfrom
-        gridoptions%facelabelsubto          = options%GGtoGDfacelabelsubto
+        gridoptions%facelabelmappingGD      = options%facelabelmappingGD
+        gridoptions%facelabelmappingGG      = options%facelabelmappingGG
+        gridoptions%facelabelsubfrom        = options%facelabelsubfrom
+        gridoptions%facelabelsubto          = options%facelabelsubto
     
         ! Reset vessel reading 
-        environmentoptions%vesselfilepath = options%structurefilepath
+        environmentoptions%vesselfilepath   = options%structurefilepath
+
+        ! Carry over some environment options
+        options%readstate                   = environmentoptions%readstate
+        options%readstatemeth               = environmentoptions%readstatemeth
     
         ! Read data
         !==========

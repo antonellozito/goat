@@ -32,7 +32,24 @@ module gamod_math
         module procedure Norm0D, Norm1D
     end interface
 
+    interface Cosin
+        module procedure Cosin0D, Cosin1D
+    end interface
+
+    interface Sinin
+        module procedure Sinin0D, Sinin1D
+    end interface   
+
+    interface Trim
+        module procedure Trim0D, Trim1D
+    end interface
+
     contains
+    !==================================================================!
+    !                                                                  !
+    !                          FUNCTIONS                               !
+    !                                                                  !
+    !==================================================================!
 
     function Intersects(p1, q1, p2, q2) result(res)
         real(R8) :: p1(2), q1(2), p2(2), q2(2)
@@ -126,6 +143,50 @@ module gamod_math
         real(R8), allocatable :: res(:)
         res = sqrt(x0**2 + y0**2)
     end function    
+
+    function Cosin0D(p0x, p0y, p1x, p1y) result(res)
+        real(R8) :: p0x, p0y, p1x, p1y
+        real(R8) :: res
+        res = Trim((p0x*p1x + p0y*p1y)/(Norm(p0x, p0y)*Norm(p1x, p1y)))
+    end function
+
+    function Cosin1D(p0x, p0y, p1x, p1y) result(res)
+        real(R8) :: p0x(:), p0y(:), p1x(:), p1y(:)
+        real(R8), allocatable :: res(:)
+        res = Trim((p0x*p1x + p0y*p1y)/(Norm(p0x, p0y)*Norm(p1x, p1y)))
+    end function
+
+    function Sinin0D(p0x, p0y, p1x, p1y) result(res)
+        real(R8) :: p0x, p0y, p1x, p1y
+        real(R8) :: res
+        res = Trim((p0x*p1y - p0y*p1x)/(Norm(p0x, p0y)*Norm(p1x, p1y)))
+    end function
+
+    function Sinin1D(p0x, p0y, p1x, p1y) result(res)
+        real(R8) :: p0x(:), p0y(:), p1x(:), p1y(:)
+        real(R8), allocatable :: res(:)
+        res = Trim((p0x*p1y - p0y*p1x)/(Norm(p0x, p0y)*Norm(p1x, p1y)))
+    end function
+
+    function Trim0D(p0x) result(res)
+        real(R8) :: p0x
+        real(R8) :: res
+        res = max(-1.0_R8, min(1.0_R8, p0x))
+    end function
+
+    function Trim1D(p0x) result(res)
+        real(R8) :: p0x(:)
+        real(R8), allocatable :: res(:), armin(:,:), armax(:,:), resmin(:)
+        
+        allocate(armin(size(p0x), 2), armax(size(p0x), 2))
+        armin(:,1) = p0x
+        armin(:,2) = 1.0_R8
+        resmin = minval(armin,2)
+        armax(:,1) = resmin
+        armax(:,2) = -1.0_R8
+        res = maxval(armax,2)
+
+    end function
     
     
 end module 
