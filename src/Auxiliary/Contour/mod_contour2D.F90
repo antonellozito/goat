@@ -95,7 +95,7 @@ module mod_contour2D
         ! underlying mechanics (structured/unstructured grid etc), except
         ! on the constructor level. All necessary data to trace the 
         ! contours should be saved in the object itself, except for the 
-        ! saddle point data - that is already available in this 
+        ! special point data - that is already available in this 
         ! type already, since it should be supported in any tracer here.
         ! For easier redefinition of tracing values, routines should be
         ! specified that return the location on which the field value
@@ -104,6 +104,7 @@ module mod_contour2D
         real(R8), allocatable, dimension(:)     :: xs, ys, vs
         integer(I8)                             :: npmin, npmax
         integer(I8), allocatable, dimension(:)  :: order, IDs
+        logical, allocatable, dimension(:)      :: issaddle 
 
     contains 
 
@@ -174,15 +175,21 @@ module mod_contour2D
 
         ! Description
         !============
-        ! Structure that contains additional saddle point information
+        ! Structure that contains additional special point information
         ! used during the contour line tracing to traverse saddle 
-        ! points in a correct way. 
+        ! points in a correct way. Note: these special points were 
+        ! originally intended as true saddle points, but nowadays they're
+        ! used as general special points in which the contouring algorithm
+        ! should stop. To indicate that this is an actual saddle point, 
+        ! the 'issaddle' logical is used, which is evidently true  
+        ! if this point is a true saddle point. 
 
         integer(I8)                 :: ID, ixquad, iyquad, order, starttri
         integer(I8), allocatable    :: tri(:, :), ixquadtri(:), &
             iyquadtri(:), ixpoints(:), iypoints(:)
         real(R8)                    :: x, y, val, startx, starty 
         real(R8), allocatable       :: valpoints(:)
+        logical                     :: issaddle
         logical, allocatable        :: hasftri(:, :)
 
     contains 
@@ -323,7 +330,7 @@ module mod_contour2D
     end function
 
     ! Structured tracer constructor
-    function ConstructStructuredTracer(V, X, Y, xs, ys, vs, IDs, &
+    function ConstructStructuredTracer(V, X, Y, xs, ys, vs, IDs, issaddle, &
         npmin, npmax, dl) result(tracer)
 
         ! Description
@@ -336,6 +343,7 @@ module mod_contour2D
         ! Arguments
         type(StructuredContourTracerUDT)    :: tracer 
         real(R8), intent(in), dimension(:)      :: X, Y, xs, ys, vs 
+        logical, intent(in), dimension(:)       :: issaddle
         real(R8), intent(in)                    :: V(:, :), dl
         integer(I8), intent(in), dimension(:)   :: IDs
         integer(I8), intent(in)                 :: npmin, npmax
@@ -353,38 +361,31 @@ module mod_contour2D
 
         ! Set values
         !===========
-        !select type (tracer)
+        tracer%dl = dl 
+        if (npmin <= 2) then 
+            tracer%npmin = 3
+        else
+            tracer%npmin = npmin
+        end if 
+        if (npmax <= 2) then 
+            tracer%npmax = 3
+        else
+            tracer%npmax = npmax
+        end if 
+        tracer%V = V 
+        tracer%X = X 
+        tracer%Y = Y 
+        tracer%xs = xs 
+        tracer%ys = ys 
+        tracer%vs = vs 
+        tracer%IDs = IDs
+        tracer%issaddle = issaddle 
+        tracer%order = order  
 
-        !type is (StructuredContourTracerUDT)
-
-            tracer%dl = dl 
-            if (npmin <= 2) then 
-                tracer%npmin = 3
-            else
-                tracer%npmin = npmin
-            end if 
-            if (npmax <= 2) then 
-                tracer%npmax = 3
-            else
-                tracer%npmax = npmax
-            end if 
-            tracer%V = V 
-            tracer%X = X 
-            tracer%Y = Y 
-            tracer%xs = xs 
-            tracer%ys = ys 
-            tracer%vs = vs 
-            tracer%IDs = IDs
-            tracer%order = order  
-
-            allocate(xg(size(X)*size(Y)), yg(size(X)*size(Y)))
-            call Construct2DStructuredGrid(X, Y, size(X), size(Y), xg, yg)
-            tracer%xg = xg 
-            tracer%yg = yg
-
-        !class default 
-
-        !end select
+        allocate(xg(size(X)*size(Y)), yg(size(X)*size(Y)))
+        call Construct2DStructuredGrid(X, Y, size(X), size(Y), xg, yg)
+        tracer%xg = xg 
+        tracer%yg = yg
 
     end function 
 
@@ -422,7 +423,7 @@ module mod_contour2D
 
     ! 2D structured contour line tracer 
     subroutine TraceContoursStructured2D(V, X, Y, tracevalues, xs, ys, &
-        vs, IDs, order, contours) 
+        vs, IDs, issaddle, order, contours) 
 
         ! Description
         !============
@@ -510,6 +511,7 @@ module mod_contour2D
         type(ContourUDT), allocatable, intent(out)  :: contours(:) 
         integer(I8), intent(inout)      :: order(:) 
         integer(I8), intent(in)         :: IDs(:)
+        logical, intent(in)             :: issaddle(:)
 
         ! Auxiliary
         type(sp2DUDt), allocatable      :: spstruct(:)
@@ -553,7 +555,7 @@ module mod_contour2D
             superquadfaceyflags(nx-1, ny))
         call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
             superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
-            vs, IDs)
+            vs, IDs, issaddle)
         do i = 1, size(spstruct)
             order(i) = spstruct(i)%order
         end do 
@@ -627,7 +629,7 @@ module mod_contour2D
 
     ! 2D structured contour line tracer that starts from point locations
     subroutine TracecontoursStructured2DPoint(V, X, Y, xt, yt, xs, ys, &
-        vs, IDs, order, contours)
+        vs, IDs, issaddle, order, contours)
 
         ! Description
         !============
@@ -705,6 +707,7 @@ module mod_contour2D
         type(ContourUDT), allocatable, intent(out)  :: contours(:) 
         integer(I8), intent(inout)      :: order(:)
         integer(I8), intent(in)         :: IDs(:)
+        logical, intent(in)             :: issaddle(:)
 
         ! Auxiliary
         type(sp2DUDt), allocatable      :: spstruct(:)
@@ -748,7 +751,7 @@ module mod_contour2D
             superquadfaceyflags(nx-1, ny))
         call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
             superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
-            vs, IDs)
+            vs, IDs, issaddle)
         do i = 1, size(spstruct)
             order(i) = spstruct(i)%order
         end do 
@@ -881,7 +884,7 @@ module mod_contour2D
             superquadfaceyflags(size(X)-1, size(Y)))
         call InitializeSaddlePointStructure2D(spstruct, superquadflags, &
             superquadfacexflags, superquadfaceyflags, V, X, Y, xs, ys, &
-            vs, IDs)
+            vs, IDs, tracer%issaddle)
 
         ! Compute values
         !===============
@@ -969,7 +972,7 @@ module mod_contour2D
         !======
         call TraceContoursStructured2D(tracer%V, tracer%X, tracer%Y, &
             tracevalues, tracer%xs, tracer%ys, tracer%vs, tracer%IDs, &
-            tracer%order, contours)
+            tracer%issaddle, tracer%order, contours)
 
     end function 
 
@@ -991,7 +994,7 @@ module mod_contour2D
         !======
         call TraceContoursStructured2DPoint(tracer%V, tracer%X, tracer%Y, &
             x, y, tracer%xs, tracer%ys, tracer%vs, tracer%IDs, &
-            tracer%order, contours)
+            tracer%issaddle, tracer%order, contours)
 
     end function 
 
@@ -2135,7 +2138,7 @@ module mod_contour2D
     ! Saddle point structure initializer for 2D tracer
     subroutine InitializeSaddlePointStructure2D(spstruct, &
         quadflags, facexflags, faceyflags, &
-        V, X, Y, xs, ys, vs, IDs)
+        V, X, Y, xs, ys, vs, IDs ,issaddle)
 
         ! Description
         !============
@@ -2169,6 +2172,16 @@ module mod_contour2D
         ! hedge for wrongly passed saddle points, so errors may still 
         ! occur... 
 
+        ! Note 3: we now adjust the size of npq for true saddle points 
+        ! to ensure that the given value is encountered at least 4 times
+        ! on the boundary (message will be shown). If this is not the 
+        ! case for the default padding, the padding size is increased. 
+        ! It is very important that the 'issaddle' logical is correctly
+        ! determined for this purpose: if the given special point is 
+        ! in fact not a saddle point but marked as such, the padding may
+        ! increase substantially and may lead to errors downstream (e.g.
+        ! overlapping saddle point domains etc)
+
         ! Declare variables
         !==================
         ! Arguments
@@ -2179,10 +2192,11 @@ module mod_contour2D
         integer(I8), intent(in)             :: IDs(:)
         logical, intent(out)                :: facexflags(size(X), size(Y)-1), &
             faceyflags(size(X)-1, size(Y))
+        logical, intent(in)                 :: issaddle(:)
         
         ! Auxiliary
         integer(I8)                         :: ixquad, iyquad, ntri, &
-            nx, ny, m
+            nx, ny, m, tnpq
         integer(I8), allocatable            :: stencilx(:), stencily(:)
         logical, allocatable                :: hasvp(:), hasftri(:), &
             keepind(:)
@@ -2195,13 +2209,13 @@ module mod_contour2D
         ! Quadflag counter - to account for possible deletion of 
         ! saddle points
         qfc = 0
+    
+        ! Set initial padding width
+        tnpq = npq 
 
         ! Set sizes
         nx = size(X)
         ny = size(Y)
-
-        ! Set number of triangles
-        ntri = (2*npq+1)*4
         
         ! Initialize flags
         quadflags = 0 
@@ -2242,86 +2256,112 @@ module mod_contour2D
             spstruct(i)%val     = vs(i)
             spstruct(i)%ixquad  = ixquad 
             spstruct(i)%iyquad  = iyquad 
-            
-            ! Initialize
-            
-            allocate(spstruct(i)%ixpoints(ntri+1), &
-                spstruct(i)%iypoints(ntri+1), &
-                spstruct(i)%valpoints(ntri+1), &
-                spstruct(i)%tri(ntri, 3))
-            
-            ! Triangles
-            spstruct(i)%tri(:, 1) = 1  ! first point is saddle point
-            spstruct(i)%valpoints(1) = spstruct(i)%val 
-            spstruct(i)%tri(:, 2) = [(k, k = 2, ntri+1)] 
-            spstruct(i)%tri(:, 3) = [(k, k = 3, ntri+1), 2] 
-            
-            ! Points
-            stencilx = [(k, k = -npq, npq)] + ixquad  ! stencil for cells
-            stencily = [(k, k = -npq, npq)] + iyquad 
-            if (stencilx(1) < 1) then 
-                stencilx = stencilx + 1 - stencilx(1)  
-            end if
-            if (stencilx(2*npq+1) > nx-1) then 
-                stencilx = stencilx - (stencilx(2*npq+1) - (nx - 1) ) 
-            end if 
-            if (stencily(1) < 1) then 
-                stencily = stencily + 1 - stencily(1)  
-            end if
-            if (stencily(2*npq+1) > ny-1) then 
-                stencily = stencily - (stencily(2*npq+1) - (ny - 1) ) 
-            end if
-            
-            spstruct(i)%ixpoints = [0, spread(stencilx(1), 1, 2*npq+1), &
-                stencilx, spread(stencilx(2*npq+1)+1, 1, 2*npq+2), &
-                stencilx((2*npq+1):2:-1)] 
-            spstruct(i)%iypoints = [0, stencily, &
-                spread(stencily(2*npq+1)+1, 1, 2*npq+2), &
-                stencily((2*npq+1):1:-1), spread(stencily(1), 1, 2*npq)]
-            do k = 2, ntri+1
-                spstruct(i)%valpoints(k) = V(spstruct(i)%ixpoints(k), spstruct(i)%iypoints(k)) 
-            end do
-                    
-            ! Check
-            if (any(any(quadflags(stencilx, stencily) > 0, 1))) then
-                print *, 'Saddle point number: ', i  
-                call gdErrorHandler('InitializeSaddlePointStructure: ' // &
-                 'saddle point domains overlap, not supported. ' // & 
-                 'Consider refining the grid or removing saddle points. ')
-            end if
 
-            ! Determine x-point order
-            hasvp = spstruct(i)%valpoints >= spstruct(i)%val 
-            hasftri = (hasvp(spstruct(i)%tri(:, 2)) .and. &
-                (.not. hasvp(spstruct(i)%tri(:, 3)))) .or. &
-                (hasvp(spstruct(i)%tri(:, 3)) .and. &
-                (.not. (hasvp(spstruct(i)%tri(:, 2))))) 
-            m = count(hasftri)  ! number of intersections with outer boundary
-            
-            ! Check
-            if (modulo(m, 2) > 0) then 
-                ! Something weird going on
-                print *, 'InitializeSaddlePointStructure: order of saddle ' // &
-                    'point with ID ', i, ' could not be determined, ' // &
-                    'returning NaN for this order and not including as '// & 
-                    'saddle point for tracing'
+            ! Determine padding size
+            do while (.true.) ! exit conditions at end of loop
+                ! Set initial number of triangles
+                ntri = (2*tnpq+1)*4
                 
-                ! Mark for deletion
-                keepind(i) = .false. 
+                ! Initialize           
+                allocate(spstruct(i)%ixpoints(ntri+1), &
+                    spstruct(i)%iypoints(ntri+1), &
+                    spstruct(i)%valpoints(ntri+1), &
+                    spstruct(i)%tri(ntri, 3))
+                
+                ! Triangles
+                spstruct(i)%tri(:, 1) = 1  ! first point is saddle point
+                spstruct(i)%valpoints(1) = spstruct(i)%val 
+                spstruct(i)%tri(:, 2) = [(k, k = 2, ntri+1)] 
+                spstruct(i)%tri(:, 3) = [(k, k = 3, ntri+1), 2] 
+                
+                ! Points
+                stencilx = [(k, k = -tnpq, tnpq)] + ixquad  ! stencil for cells
+                stencily = [(k, k = -tnpq, tnpq)] + iyquad 
+                if (stencilx(1) < 1) then 
+                    stencilx = stencilx + 1 - stencilx(1)  
+                end if
+                if (stencilx(2*tnpq+1) > nx-1) then 
+                    stencilx = stencilx - (stencilx(2*tnpq+1) - (nx - 1) ) 
+                end if 
+                if (stencily(1) < 1) then 
+                    stencily = stencily + 1 - stencily(1)  
+                end if
+                if (stencily(2*tnpq+1) > ny-1) then 
+                    stencily = stencily - (stencily(2*tnpq+1) - (ny - 1) ) 
+                end if
+                
+                spstruct(i)%ixpoints = [0, spread(stencilx(1), 1, 2*tnpq+1), &
+                    stencilx, spread(stencilx(2*tnpq+1)+1, 1, 2*tnpq+2), &
+                    stencilx((2*tnpq+1):2:-1)] 
+                spstruct(i)%iypoints = [0, stencily, &
+                    spread(stencily(2*tnpq+1)+1, 1, 2*tnpq+2), &
+                    stencily((2*tnpq+1):1:-1), spread(stencily(1), 1, 2*tnpq)]
+                do k = 2, ntri+1
+                    spstruct(i)%valpoints(k) = V(spstruct(i)%ixpoints(k), spstruct(i)%iypoints(k)) 
+                end do
+                        
+                ! Check
+                if (any(any(quadflags(stencilx, stencily) > 0, 1))) then
+                    print *, 'Saddle point number: ', i  
+                    call gdErrorHandler('InitializeSaddlePointStructure: ' // &
+                    'saddle point domains overlap, not supported. ' // & 
+                    'Consider refining the grid or removing saddle points. ')
+                end if
 
-                ! Skip
-                cycle 
-            end if
-            if (m == 0) then 
-                ! This may happen when e.g. an extremum is given as a 
-                ! pseudo saddlepoint. Ignore it, but don't issue warning
-                !print *, 'InitializeSaddlePointStructure: given saddle ' // & 
-                !    'point value is not present on any of the saddle ' // & 
-                !    'point domain boundaries - please check input value.' // &
-                !    'Ignoring saddle point ', i
+                ! Determine x-point order
+                hasvp = spstruct(i)%valpoints >= spstruct(i)%val 
+                hasftri = (hasvp(spstruct(i)%tri(:, 2)) .and. &
+                    (.not. hasvp(spstruct(i)%tri(:, 3)))) .or. &
+                    (hasvp(spstruct(i)%tri(:, 3)) .and. &
+                    (.not. (hasvp(spstruct(i)%tri(:, 2))))) 
+                m = count(hasftri)  ! number of intersections with outer boundary
+                
+                ! Check
+                if (modulo(m, 2) > 0) then 
+                    ! Something weird going on
+                    print *, 'InitializeSaddlePointStructure: order of saddle ' // &
+                        'point with ID ', i, ' could not be determined, ' // &
+                        'returning NaN for this order and not including as '// & 
+                        'saddle point for tracing'
+                    
+                    ! Mark for deletion
+                    keepind(i) = .false. 
 
-                ! Mark for deletion
-                keepind(i) = .false. 
+                    ! Skip
+                    cycle 
+                end if
+                if (issaddle(i)) then 
+                    if (m < 4) then 
+                        ! Need to increase padding. Display message
+                        if (verbosity > 0) then 
+                            print *, 'InitializeSaddlePointStructure: saddle point value of ' // & 
+                                'saddle point with ID: ', IDs(i), ' does not occur at least 4 times ' // & 
+                                'on X-point area boundary, increasing number of padding quads to ', tnpq+1
+                        end if 
+                        tnpq = tnpq + 1
+
+                        ! Deallocate 
+                        deallocate(spstruct(i)%ixpoints, spstruct(i)%iypoints, &
+                            spstruct(i)%valpoints, spstruct(i)%tri)
+                    else
+                        ! All good, exit
+                        exit 
+                    end if 
+                else 
+
+                    if (m == 0) then 
+                        ! The given special point is not a saddle point, so no problem
+                        ! Mark for deletion and exit
+                        keepind(i) = .false. 
+                    end if 
+                        
+                    ! If we got here, we can exit the loop
+                    exit
+                end if 
+            end do 
+
+            ! Check
+            if (.not. keepind(i)) then 
                 cycle 
             end if 
             
@@ -2339,12 +2379,12 @@ module mod_contour2D
             faceyflags(stencilx, stencily(2:size(stencily))) = .true. 
             
             ! Set quad indices for triangles
-            spstruct(i)%ixquadtri = [spread(stencilx(1), 1, 2*npq+1), &
-                stencilx, spread(stencilx(2*npq+1), 1, 2*npq+1), &
-                stencilx(2*npq+1:1:-1)]  
+            spstruct(i)%ixquadtri = [spread(stencilx(1), 1, 2*tnpq+1), &
+                stencilx, spread(stencilx(2*tnpq+1), 1, 2*tnpq+1), &
+                stencilx(2*tnpq+1:1:-1)]  
             spstruct(i)%iyquadtri = [stencily, &
-                spread(stencily(2*npq+1), 1, 2*npq+1), &
-                stencily((2*npq+1):1:-1), spread(stencily(1), 1, 2*npq+1)]  
+                spread(stencily(2*tnpq+1), 1, 2*tnpq+1), &
+                stencily((2*tnpq+1):1:-1), spread(stencily(1), 1, 2*tnpq+1)]  
 
         end do 
 
@@ -3273,7 +3313,7 @@ module mod_contour2D
         character(*), intent(in)            :: filename 
 
         ! Auxiliary
-        integer                             :: fu 
+        integer                             :: fu, issaddlei 
         character(:), allocatable           :: dir 
 
         ! Loop
@@ -3293,6 +3333,7 @@ module mod_contour2D
             xs      => tracer%xs,   &
             ys      => tracer%ys,   &
             vs      => tracer%vs,   &
+            issaddle    => tracer%issaddle,     &
             dl      => tracer%dl,   &
             npmin   => tracer%npmin,    &
             npmax   => tracer%npmax,    &
@@ -3319,9 +3360,14 @@ module mod_contour2D
         write(fu, *) dl, npmin, npmax 
 
         ! xs, ys, vs, order, ID
-        write(fu, *) 'xs, ys, vs, order, ID'
+        write(fu, *) 'xs, ys, vs, order, ID, issaddle'
         do i = 1, size(xs)
-            write(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i)
+            if (issaddle(i)) then 
+                issaddlei = 1
+            else 
+                issaddlei = 0
+            end if 
+            write(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i), issaddlei
         end do 
 
         ! Specific tracer data
@@ -3373,7 +3419,7 @@ module mod_contour2D
         character(*), intent(in)            :: filename 
 
         ! Auxiliary
-        integer                             :: fu 
+        integer                             :: fu, issaddlei
         integer(I8)                         :: ns, nx, ny
         logical                             :: reachedeof
         character(:), allocatable           :: thisline
@@ -3397,6 +3443,7 @@ module mod_contour2D
         if (allocated(tracer%X)) deallocate(tracer%X)
         if (allocated(tracer%Y)) deallocate(tracer%Y)
         if (allocated(tracer%V)) deallocate(tracer%V)
+        if (allocated(tracer%issaddle)) deallocate(tracer%issaddle)
 
         ! Write data
         !===========
@@ -3414,7 +3461,7 @@ module mod_contour2D
 
         ! Allocate
         allocate(tracer%xs(ns), tracer%ys(ns), tracer%vs(ns), &
-            tracer%order(ns), tracer%IDs(ns), tracer%X(nx), &
+            tracer%order(ns), tracer%IDs(ns), tracer%issaddle(ns), tracer%X(nx), &
             tracer%Y(ny), tracer%V(nx, ny))
 
         ! Unpack
@@ -3423,6 +3470,7 @@ module mod_contour2D
             ys      => tracer%ys,   &
             vs      => tracer%vs,   &
             dl      => tracer%dl,   &
+            issaddle    => tracer%issaddle,     &
             npmin   => tracer%npmin,    &
             npmax   => tracer%npmax,    &
             order   => tracer%order,    &
@@ -3436,10 +3484,15 @@ module mod_contour2D
         call ReadSingleLine(fu, thisline, reachedeof)
         read(fu, *) dl, npmin, npmax 
 
-        ! xs, ys, vs, order, ID
+        ! xs, ys, vs, order, ID, issaddle
         call ReadSingleLine(fu, thisline, reachedeof)
         do i = 1, size(xs)
-            read(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i)
+            read(fu, *) xs(i), ys(i), vs(i), order(i), IDs(i), issaddlei
+            if (issaddlei > 0) then 
+                issaddle(i) = .true.
+            else 
+                issaddle(i) = .false.
+            end if 
         end do 
 
         ! Specific tracer data

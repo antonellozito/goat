@@ -277,6 +277,24 @@ module gdmod_userinput
 
     end type
 
+    type, extends(OptionsUDT)   :: CostFunctionOptionsRTUDT 
+
+        ! Regularization term cost function
+        ! Fields:
+        ! - lambda: cost function scaling constant
+        ! - d0:     length scale 
+
+        ! Standard distribution options for desired bias and weight
+
+        real(R8)                    :: lambda, d0
+
+    contains
+
+        procedure :: SetDefaults    => SetDefaultCostFunctionOptionsRT
+        procedure :: Read           => ReadCostFunctionOptionsRT
+
+    end type
+
     ! Options for the cost function
     type, extends(OptionsUDT) :: CostFunctionOptionsUDT
 
@@ -303,6 +321,7 @@ module gdmod_userinput
         type(CostfunctionOptionsLDUDT)      :: LD
         type(CostfunctionOptionsPRPBUDT)    :: PRPB
         type(CostfunctionOptionsLRradUDT)   :: LRrad
+        type(CostfunctionOptionsRTUDT)      :: RT
 
     contains 
 
@@ -613,6 +632,7 @@ module gdmod_userinput
         options%LRrad%inputfilepath = options%inputfilepath
         options%CA%inputfilepath    = options%inputfilepath
         options%LD%inputfilepath    = options%inputfilepath
+        options%RT%inputfilepath    = options%inputfilepath
 
         ! Set cost function specific options
         !===================================
@@ -623,6 +643,7 @@ module gdmod_userinput
         call options%LRrad%Set()
         call options%CA%Set()
         call options%LD%Set()
+        call options%RT%Set()
 
     end subroutine
 
@@ -640,11 +661,11 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
-        options%eta = 1e-5 ! in coordinate units
+        options%lambda = 0e0_R8
+        options%eta = 1e-5_R8 ! in coordinate units
         options%dovessel = .false.
-        options%lengthparam = 0.1 ! in coordinate units
-        options%biasatvessel = 1
+        options%lengthparam = 0.1_R8 ! in coordinate units
+        options%biasatvessel = 1_R8
 
     end subroutine
 
@@ -662,8 +683,8 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata           = 1
-        options%lambda              = 1e0
-        options%eta                 = 1e-5 ! in coordinate units
+        options%lambda              = 0e0_R8
+        options%eta                 = 1e-5_R8 ! in coordinate units
         options%includecutcellfaces = .true.
         options%excludedomainfaces  = .true.
 
@@ -684,12 +705,12 @@ module gdmod_userinput
         !================
         ! Standard options
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
 
         ! Distribution options (weights)
-        options%weightatvessel  = 1
-        options%weightatinf     = 1
-        options%decaylength     = 1
+        options%weightatvessel  = 1_R8
+        options%weightatinf     = 1_R8
+        options%decaylength     = 1_R8
 
     end subroutine
 
@@ -707,12 +728,12 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
         
         ! Distribution options (weights)
-        options%weightatvessel  = 1
-        options%weightatinf     = 1
-        options%decaylength     = 1
+        options%weightatvessel  = 1_R8
+        options%weightatinf     = 1_R8
+        options%decaylength     = 1_R8
 
     end subroutine
 
@@ -730,12 +751,12 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
         
         ! Distribution options (weights)
-        options%weightatvessel  = 1
-        options%weightatinf     = 1
-        options%decaylength     = 1
+        options%weightatvessel  = 1_R8
+        options%weightatinf     = 1_R8
+        options%decaylength     = 1_R8
 
     end subroutine
 
@@ -763,7 +784,7 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
         
         ! Distribution options (weights)
         options%wtatinf         = 1.0_R8
@@ -793,15 +814,33 @@ module gdmod_userinput
         ! Default options
         !================
         options%writedata = 1
-        options%lambda = 1e0
+        options%lambda = 0e0_R8
 
-        options%weightatsep = 1
-        options%weightatinf = 1
-        options%weightdecaylength = 0.1 
+        options%weightatsep = 1_R8
+        options%weightatinf = 1_R8
+        options%weightdecaylength = 0.1 _R8
 
-        options%biasatsep = 1
-        options%biasatinf = 1
-        options%biasdecaylength = 0.1
+        options%biasatsep = 1_R8
+        options%biasatinf = 1_R8
+        options%biasdecaylength = 0.1_R8
+
+    end subroutine
+
+    subroutine SetDefaultCostFunctionOptionsRT(options)
+
+        ! Description
+        !============
+        ! Set default cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsRTUDT) :: options 
+
+        ! Default options
+        !================
+        options%d0      = 1.0_R8
+        options%lambda  = 0e0_R8
 
     end subroutine
 
@@ -869,7 +908,7 @@ module gdmod_userinput
         ! Default options
         !================
         options%type        = 'polygon'
-        options%psitol      = 0 
+        options%psitol      = 0_R8
 
     end subroutine
 
@@ -932,7 +971,7 @@ module gdmod_userinput
         options%includecutcellvert = .false.
         options%checkperp = 0 
         options%includecutcellvert = .false. 
-        options%epsperp = 0.2
+        options%epsperp = 0.2_R8
         options%includecorevert = .true.
         if (allocated(options%includeboxx)) then 
             deallocate(options%includeboxx, options%includeboxy, &
@@ -960,8 +999,8 @@ module gdmod_userinput
         options%doTP = 1
         options%doWG = 0
         options%doxpointedges = 0
-        options%edgedistvessel = 1e-3
-        options%edgedistxpoint = 1e-3
+        options%edgedistvessel = 1e-3_R8
+        options%edgedistxpoint = 1e-3_R8
 
         ! Goat data options
         options%usegoatdata = .true. 
@@ -1003,8 +1042,8 @@ module gdmod_userinput
         options%poloidal    = .true. 
         options%radial      = .true. 
         options%vessel      = .true.
-        options%smallnumber = 1e-6
-        options%fieldtol    = 1e-10
+        options%smallnumber = 1e-6_R8
+        options%fieldtol    = 1e-10_R8
 
     end subroutine
 
@@ -1721,6 +1760,60 @@ module gdmod_userinput
         field = 'gd.design.cfv.par.PRPB.writedata'
         call ExtractOptionValueInteger0D(fid, field, options%writedata) 
         
+        ! Housekeeping
+        !=============
+        ! Close the file
+        close(unit=fid)
+
+    end subroutine
+
+    subroutine ReadCostFunctionOptionsRT(options)
+
+        ! Description
+        !============
+        ! Read in user-specified cost function options
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(CostFunctionOptionsRTUDT)     :: options 
+
+        ! Auxiliary
+        integer                         :: openstatus 
+        character(:), allocatable       :: field
+        integer, parameter              :: fid = 10 
+        logical                         :: reachedeof
+
+        ! Initialize
+        !===========
+        ! Variables
+        reachedeof = .false. 
+
+        ! Open the file, check if it exists
+        open(unit=fid, file=options%inputfilepath, status='old', &
+            iostat=openstatus)
+
+        if (openstatus > 0) then 
+            ! Something wrong when reading file - continue with default
+            ! values
+            print *, 'ReadCostFunctionOptionsRT: could not open file, ' &
+                // 'taking default options...'
+        elseif (openstatus < 0) then 
+            ! File appears to be empty
+            print *, 'ReadCostFunctionOptionsRT: file appears to be empty, ' &
+                // 'taking default options...'
+        end if
+        
+        ! Read options
+        !=============
+        ! Scaling constant
+        field = 'gd.design.cfv.par.RT.lambda'
+        call ExtractOptionValueReal0D(fid, field, options%lambda) 
+
+        ! Length scale
+        field = 'gd.design.cfv.par.RT.d0'
+        call ExtractOptionValueReal0D(fid, field, options%d0) 
+
         ! Housekeeping
         !=============
         ! Close the file

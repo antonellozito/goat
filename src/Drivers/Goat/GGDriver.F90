@@ -44,6 +44,7 @@ subroutine GGDriver(goatoptions)
     real(R8), parameter                     :: emptyR8(0)= 0
     integer(I8)                             :: nv
     integer(I8), parameter                  :: emptyI8(0) = 0
+    logical, parameter                      :: emptyL(0) = .false.
 
     ! Loop
 
@@ -87,13 +88,13 @@ subroutine GGDriver(goatoptions)
     ! Field contours
     fieldtracer = ConstructStructuredTracer(&
         reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-        emptyR8, emptyR8, emptyR8, emptyi8, topomeshoptions%npmin, &
+        emptyR8, emptyR8, emptyR8, emptyi8, emptyL, topomeshoptions%npmin, &
         topomeshoptions%npmax, topomeshoptions%dl)
 
     ! Vessel contours
     vesseltracer = ConstructStructuredTracer(&
         reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-        emptyR8, emptyR8, emptyR8, emptyI8, topomeshoptions%npmin, &
+        emptyR8, emptyR8, emptyR8, emptyI8, emptyL, topomeshoptions%npmin, &
         topomeshoptions%npmax, topomeshoptions%dl)
 
     ! Orthogonal lines

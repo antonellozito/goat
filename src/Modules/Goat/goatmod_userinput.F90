@@ -773,6 +773,9 @@ module goatmod_userinput
         !                       which we try to merge - set to 0 to ignore)
         ! - lradmintubes        minimal radial length for topomesh tubes
         !                       (below which we try to merge - set to 0 to ignore)
+        ! - lpolsepmin          minimal separatrix face length in poloidal direction.
+        !                       If lower, separatrix faces can be removed
+        !                       during separatrix simplification step
         ! - mtallowseparatrix   allow merging over the separatrix for 
         !                       the general merge case
         ! - mtallowcore, mtallowpf  same as separatrix, but for core and 
@@ -805,11 +808,11 @@ module goatmod_userinput
             readexistingTM, removenoncoreregions, &
             doadaptations, dotpvesselbased, removevesselregions, rvrretain, &
             rvrdocascade, rvrfullycovered, alignvesselparts, avprefinevessel, &
-            readexistingtracers, mergetubes, mtallowcore, &
+            readexistingtracers, mergetubes, mtallowcore, simplifyseparatrix, &
             mtallowpf, mtallowseparatrix, writedebugoutput, mtoldstyle
         real(R8)                :: coreboundariesfrac, ffieldtol, dl, &
             PFboundariesfrac, avpminangle, avpmaxvesseldist, &
-                dpsimintubes, lradmintubes
+                dpsimintubes, lradmintubes, lpolsepmin
         character(:), allocatable   :: TMfilepath, rvrcascadedir, &
             TMfieldtracerfilepath, TMvesseltracerfilepath, mergetubemeth
     contains 
@@ -1457,8 +1460,10 @@ module goatmod_userinput
         options%mtallowpf                   = .false.
         options%mtallowseparatrix           = .false.
         options%mtoldstyle                  = .false. 
+        options%simplifyseparatrix          = .false. 
         options%dpsimintubes                = 0.0_R8 ! zero to ignore
         options%lradmintubes                = 0.0_R8 ! zero to ignore
+        options%lpolsepmin                  = 0.0_R8
 
         options%removevesselregions         = .false. 
         if (allocated(options%rvrvesselIDs)) deallocate(options%rvrvesselIDs)
@@ -2494,6 +2499,12 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%lradmintubes)
         field = 'gg.tm.mergetubes.oldstyle'
         call ExtractOptionValueLogical0D(fid, field, options%mtoldstyle)
+        field = 'gg.tm.lradmintubes'
+        call ExtractOptionValueReal0D(fid, field, options%lradmintubes)
+        field = 'gg.tm.simplifyseparatrix'
+        call ExtractOptionValueLogical0D(fid, field, options%simplifyseparatrix)
+        field = 'gg.tm.simplifyseparatrix.lpolsepmin'
+        call ExtractOptionValueReal0D(fid, field, options%lpolsepmin)
 
         field = 'gg.tm.removevesselregions'
         call ExtractOptionValueLogical0D(fid, field, options%removevesselregions)

@@ -9,7 +9,7 @@ VERSION 1.00.00
 #-------------------------------------------------------------------------#
 # General options
 'goat.debug'                        '1'
-'goat.meth'                         'GA'
+'goat.meth'                         'GG'
 
 # Input file locations 
 #'goat.gridfilepath'                 'traduit.out.b2us_smoothed2'
@@ -20,7 +20,7 @@ VERSION 1.00.00
 'goat.GDinputfilepath'              'GOAToptions.dat'
 
 # Output file locations 
-'goat.writefilepath'                'traduit.out.b2us_small_trias'  
+'goat.writefilepath'                'traduit.out.b2us'  
 
 # Output options 
 'goat.write_final'                  '1'
@@ -435,7 +435,7 @@ VERSION 1.00.00
 'gg.tm.readexistingTM'          '0'
 'gg.tm.readexistingtracers'     '0'
 'gg.tm.writedebugoutput'        '0'
-'gg.tm.TMfilepath'              './output/topomesh.dat'
+'gg.tm.TMfilepath'              './output/topomesh_base.dat'
 'gg.tm.TMfieldtracerfilepath'   './output/TMfieldtracer.dat'
 'gg.tm.TMvesseltracerfilepath'  './output/TMvesseltracer.dat'
 
@@ -470,6 +470,10 @@ VERSION 1.00.00
 'gg.tm.mergetubes.meth'         'extensive'
 'gg.tm.dpsimintubes'            '0.0'
 'gg.tm.lradmintubes'            '0.5e-2'
+'gg.tm.mergetubes.allowseparatrix'     '1'
+
+'gg.tm.simplifyseparatrix'      '1'
+'gg.tm.simplifyseparatrix.lpolsepmin'   '1e-3'
 
 'gg.tm.removevesselregions'     '0'
 'gg.tm.rvrretain'               '0'
@@ -498,8 +502,8 @@ VERSION 1.00.00
 'gg.ref.LB.Lmininf'                     '0.1'
 'gg.ref.LB.Lmaxinf'                     '0.8'
 'gg.ref.LB.structureIDs'                '[11, 12]'
-'gg.ref.LB.Lminstructure'               '[0.02, 0.02]'
-'gg.ref.LB.Lmaxstructure'               '[0.08, 0.08]'
+'gg.ref.LB.Lminstructure'               '[0.005, 0.005]'
+'gg.ref.LB.Lmaxstructure'               '[0.04, 0.04]'
 'gg.ref.LB.decaylengthstructure'        '[0.2, 0.2]'
 'gg.ref.LB.Lminxp'                      '0.0001'
 'gg.ref.LB.Lmaxxp'                      '0.05'

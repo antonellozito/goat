@@ -3066,16 +3066,22 @@ module mod_polygon
                     ! Set edge as sorted
                     isremedgesorted(nextremedge) = .true.
     
-                    ! Get next vertex
+                    ! Get next vertex & check if it is branching. If so, exit
                     if (remedges(nextremedge,1) == nv) then
                         nv = remedges(nextremedge,2)
+                        if (remisbranching(nextremedge, 2)) then 
+                            polygonfound = .true. 
+                        end if 
                     else
                         nv = remedges(nextremedge,1)
+                        if (remisbranching(nextremedge, 1)) then 
+                            polygonfound = .true. 
+                        end if 
                     end if
                     
                     ! Update counters
                     spind = spind+1
-    
+
                     ! Deallocate
                     deallocate(temparray)
                 end if 
@@ -4138,7 +4144,7 @@ module mod_polygon
         real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2, &
             d
 
-        integer(I8), allocatable            :: temps(:)
+        integer(I8), allocatable            :: temps(:), sortindex(:)
         real(R8), allocatable               :: tempx(:), tempy(:), &
             tempsr(:)
         logical, allocatable                :: keepind(:)
@@ -4204,6 +4210,15 @@ module mod_polygon
         !=====================
         ! Since intersections should be sorted by default, we can 
         ! simply loop and check
+
+        ! Sort intersections along s - may not be sorted anymore due to 
+        ! parallellization
+        allocate(sortindex(counter))
+        call Sort(s, ind=sortindex)
+        x = x(sortindex)
+        y = y(sortindex)
+
+        ! Hedge for duplicates
         allocate(keepind(counter))
         keepind = .true.
         do i = 1, counter-1
@@ -4276,7 +4291,7 @@ module mod_polygon
         real(R8)                            :: xi, yi, xe1, ye1, xe2, ye2, &
             d
 
-        integer(I8), allocatable            :: temps(:)
+        integer(I8), allocatable            :: temps(:), sortindex(:)
         real(R8), allocatable               :: tempx(:), tempy(:), &
             tempsr(:)
         logical, allocatable                :: keepind(:)
@@ -4338,6 +4353,15 @@ module mod_polygon
         !=====================
         ! Since intersections should be sorted by default, we can 
         ! simply loop and check
+
+        ! Sort intersections along s - may not be sorted anymore due to 
+        ! parallellization
+        allocate(sortindex(counter))
+        call Sort(s, ind=sortindex)
+        x = x(sortindex)
+        y = y(sortindex)
+
+        ! Hedge for duplicates
         allocate(keepind(counter))
         keepind = .true.
         do i = 1, counter-1
@@ -4605,7 +4629,7 @@ module mod_polygon
         real(R8), allocatable                   :: tempx(:), tempy(:), &
             xi(:), yi(:), temps1r(:), temps2r(:)
         integer(I8), allocatable                :: temps1(:), &
-            temps2(:), si(:)
+            temps2(:), si(:), sortindex(:)
         logical, allocatable                    :: keepind(:)
 
         ! Loop
@@ -4738,6 +4762,16 @@ module mod_polygon
         !=====================
         ! We only need to check s2 since duplicates of s1 should have
         ! already been removed before
+
+        ! Sort intersections along s2 - may not be sorted anymore due to 
+        ! parallellization
+        allocate(sortindex(counter))
+        call Sort(s2, ind=sortindex)
+        x = x(sortindex)
+        y = y(sortindex)
+        s1 = s1(sortindex)
+
+        ! Hedge for duplicates
         allocate(keepind(counter))
         keepind = .true.
         do i = 1, counter-1
@@ -4839,7 +4873,7 @@ module mod_polygon
         real(R8), allocatable                   :: tempx(:), tempy(:), &
             xi(:), yi(:), temps1r(:), temps2r(:)
         integer(I8), allocatable                :: temps1(:), &
-            temps2(:), si(:)
+            temps2(:), si(:), sortindex(:)
         logical, allocatable                    :: keepind(:)
 
         ! Loop
@@ -4974,10 +5008,20 @@ module mod_polygon
         !=====================
         ! We only need to check s2 since duplicates of s1 should have
         ! already been removed before
+
+        ! Sort intersections along s2 - may not be sorted anymore due to 
+        ! parallellization
+        allocate(sortindex(counter))
+        call Sort(s2, ind=sortindex)
+        x = x(sortindex)
+        y = y(sortindex)
+        s1 = s1(sortindex)
+
+        ! Check which ones to keep
         allocate(keepind(counter))
         keepind = .true.
         do i = 1, counter-1
-            ! Check for segment index
+            ! Check for segment index 
             if ((s2(i+1) - s2(i)) == 1) then 
                 ! Check for same intersection
                 call Distance(d, x(i), y(i), x(i+1), y(i+1))
