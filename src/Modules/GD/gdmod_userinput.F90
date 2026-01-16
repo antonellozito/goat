@@ -818,7 +818,7 @@ module gdmod_userinput
 
         options%weightatsep = 1_R8
         options%weightatinf = 1_R8
-        options%weightdecaylength = 0.1 _R8
+        options%weightdecaylength = 0.1_R8
 
         options%biasatsep = 1_R8
         options%biasatinf = 1_R8
