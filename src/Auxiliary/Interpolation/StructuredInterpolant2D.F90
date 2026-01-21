@@ -385,6 +385,12 @@ module StructuredInterpolant2D
             
         end if 
 
+        ! Reconstruct grid
+        xg = spread(xgv, 2, ny)
+        yg = spread(ygv, 1, nx)
+        dx = xgv(2:nx) - xgv(1:nx-1)
+        dy = ygv(2:ny) - ygv(1:ny-1)
+
         ! Set boundary indices
         ixlb = abs(stencil(1)) + 1
         ixub = nx - abs(stencil(M+1)) 
