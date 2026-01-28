@@ -1770,7 +1770,7 @@ module ggmod_topology2D
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
         ! Auxiliary
-        real(R8)                                :: dist, startsr, endsr
+        real(R8)                                :: startsr, endsr
         real(R8), allocatable, dimension(:)     :: pspx, pspy, pspf, &
             xout, yout, iout, jout, tscr, tsfr, tx, ty, tsrfh, tsrsh
         integer(I8)                             :: npsp, &
@@ -1781,7 +1781,7 @@ module ggmod_topology2D
             tsf, tcontourind, tcstartind, tcendind
         logical                                 :: intfacestart, &
             intcstart, dointersect
-        logical, allocatable, dimension(:)      :: tracepoints, keepind, &
+        logical, allocatable, dimension(:)      :: tracepoints, &
             ispseudosaddlepoint, isnbface, rmind, isstartingcontour, &
             isendingcontour
 
@@ -2086,10 +2086,6 @@ module ggmod_topology2D
         !----------------------------
         ! First, trace all contours
         allocate(alltpc(0))
-        !$omp parallel do default(none) private(i, k, tc, keepind, dist) & 
-        !$omp shared(fieldtracer, pspx, pspy, psptype, npsp, tracepoints, &
-        !$omp alltpc, curvetypes, fsIDs, pspid) & 
-        !$omp schedule(dynamic)
         do i = 1, npsp
             if ((psptype(i) == TMvertextp2ID) .and. tracepoints(i)) then 
                 ! Trace contour
@@ -2098,51 +2094,40 @@ module ggmod_topology2D
                 ! Process
                 call CleanContours(tc)
 
-                ! Checks
-                allocate(keepind(size(tc)))
-                keepind = .true.
+                ! Check if the tangency point is connected to any other
+                ! points (we include the current point because that doesn't matter)
+                ! These points should not be traced anymore because the
+                ! contour algorithm should've gone through all of them
                 do k = 1, size(tc)
-                    ! Is the starting point the actual given start point? (should
-                    ! be exactly the same since added as starting point in the
-                    ! contouring algorithm)
-                    dist = sqrt((tc(k)%x(1) - pspx(i))**2 + (tc(k)%y(1) - pspy(i))**2)
-                    if (dist > 0.0_R8) then 
-                        print *, 'AddTopologicalMEshContours: tangency ' // & 
-                            'contour segment found that does not start ' // & 
-                            'in given tangency point. Removing...'
-                        keepind(k) = .false.
-                    end if
-                    if (tc(k)%startsaddle /= pspID(i)) then
-                        ! Normally this should come from the contour 
-                        ! tracer, but we can add it afterwards as well 
-                        print *, 'AddTopologicalMeshContours: tangency ' // &
-                            'contour segment found that starts in given ' // & 
-                            'tangency point, but that does not have the ' // &
-                            'starting saddle point ID as tangency point. ' // & 
-                            'adjusting starting ID...'
-                        tc(k)%startsaddle = pspID(i)
+                    if (tc(k)%startsaddle /= 0) then 
+                        tracepoints(tc(k)%startsaddle) = .false. 
                     end if 
-                    if (tc(k)%isclosed .and. (tc(k)%endsaddle /= pspID(i))) then 
-                        ! Ensure start and end saddle point are the same
-                        tc(k)%endsaddle = pspID(i)
+                    if (tc(k)%endsaddle /= 0) then 
+                        tracepoints(tc(k)%endsaddle) = .false. 
+                    end if 
+                end do 
+
+                ! Sanity checks
+                do k = 1, size(tc)
+                    ! Is at least one of both end points a saddle point? 
+                    ! If not, throw an error, this shouldn't happen
+                    if (tc(k)%startsaddle == 0 .and. tc(k)%endsaddle == 0) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                        call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                            'tangency point contour detected that does not start ' // & 
+                            'or end in any topomesh vertex, this is likely a bug. ' // & 
+                            'Current topomesh written in topomesh_error.dat')
                     end if 
                 end do
 
-                ! Remove
-                tc = pack(tc, keepind)
-                deallocate(keepind)
-
                 ! Add
-                !$omp critical
                 alltpc = [alltpc, tc]
                 call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
                 
                 ! Add flux surface ID
                 call fsIDs%Append(spread(i, 1, size(tc)))
-                !$omp end critical
             end if 
         end do 
-        !$omp end parallel do 
 
         ! Compute all intersections with other faces
         ntpc = size(alltpc)
@@ -2230,6 +2215,10 @@ module ggmod_topology2D
             isnbface = .false.
             do j = 1, nint
                 if (any(topomesh%face%vert(tfaceind(j), :) == alltpc(i)%startsaddle)) then 
+                    isnbface(j) = .true.
+                end if 
+                if (any(topomesh%face%vert(tfaceind(j), :) == alltpc(i)%endsaddle) .and. &
+                    alltpc(i)%endsaddle /= 0) then 
                     isnbface(j) = .true.
                 end if 
             end do             
@@ -2352,8 +2341,122 @@ module ggmod_topology2D
                     !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     
                 end if 
+            elseif (alltpc(i)%startsaddle /= 0 .and. alltpc(i)%endsaddle /= 0) then  ! open contour segment but with two tangency points
+                if (all(isnbface)) then 
+                    ! No intersections with other boundaries
+                    if (nint == 2) then 
+                        ! Simply in start and end - add full contour, so 
+                        ! do nothing
+                    else
+                        ! Here, we don't have much more to go on than 
+                        ! assuming that these intersections are somewhere
+                        ! in the start/end nodes of the contour and that
+                        ! we can partition based on that. This is of course
+                        ! not a general way and may fail if the amount of
+                        ! contour points is too low
+                        ! Print a warning
+                        print *, 'AddTopologicalMeshContours: multiple ' // & 
+                            'intersections found for closed contour with ' // & 
+                            'only neighbouring boundary faces, attempting to ' // &
+                            'split contour by partitioning intersection into ' // & 
+                            'intersections at start and end. This may not result ' // & 
+                            'in desired behavior... (vertex: ', alltpc(i)%startsaddle, ')'
 
-            else ! open contour
+                        ! Determine start & end intersections
+                        allocate(vindIfh(count(tsc < nstc/2)), &
+                            vindIsh(count(tsc >= nstc/2)))
+                        allocate(tsrfh(size(vindIfh)), tsrsh(size(vindIsh)))
+                        vindIfh = pack(tsc, tsc < nstc/2)
+                        vindIsh = pack(tsc, tsc >= nstc/2)
+                        tsrfh = pack(tscr, tsc < nstc/2)
+                        tsrsh = pack(tscr, tsc >= nstc/2)
+
+                        ! Determine start index
+                        if (size(vindIfh) > 0) then 
+                            startind = maxval(vindIfh)
+                            startsr = maxval(tsrfh)
+                        else
+                            startind = 2
+                            startsr = 0.0_R8
+                        end if 
+
+                        ! Determine end index
+                        if (size(vindIsh) > 0) then 
+                            endind = minval(vindIsh)+1
+                            endsr = minval(tsrsh)
+                        else
+                            endind = nstc
+                            endsr = real(nstc, kind=R8)
+                        end if 
+                        
+                        ! Adjust contour
+                        if (startsr /= 0.0_R8 .and. endsr /= real(nstc, kind=R8)) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [startsr, endsr], 'both', [distfrac, distfrac], .true., .true.)
+                        elseif (startsr /= 0.0_R8) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [startsr], 'start', [distfrac, distfrac], .true., .true.)
+                        elseif (endsr /= real(nstc, kind=R8)) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [endsr], 'end', [distfrac, distfrac], .true., .true.)
+                        end if 
+                        !alltpc(i)%x = alltpc(i)%x([1, (k, k = startind, endind), nstc+1])
+                        !alltpc(i)%y = alltpc(i)%y([1, (k, k = startind, endind), nstc+1])
+
+                        ! Housekeeping
+                        deallocate(vindIfh, vindIsh, tsrfh, tsrsh)
+                    end if
+                else
+                    ! At least one intersection with another boundary. 
+                    ! Note: here we do want to keep the intersection 
+                    ! with these other boundaries in the contour!
+                    ! Need to find first and second segment 
+
+                    ! First segment
+                    endind = findloc(isnbface, .false., 1, back=.false.)
+
+                    ! Add this segment as additional contour
+                    alltpc = [alltpc, alltpc(i)]
+                    indtpc = size(alltpc)
+                    alltpc(indtpc)%isclosed = .false.
+                    alltpc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
+                    if (tscr(endind-1) == 0.0_R8) then 
+                        call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                            [tscr(endind)], 'end', [-distfrac], .true., .false.)
+                    else
+                        ! Also need to delete a first part
+                        call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                            [tscr(endind-1:endind)], 'both', [distfrac, -distfrac], .true., .false.)
+                    end if 
+                    !call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                    !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
+                    !alltpc(indtpc)%x = alltpc(i)%x([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
+                    !alltpc(indtpc)%y = alltpc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
+
+                    ! Append flux surface ID etc as well!
+                    call curvetypes%Append(curvetypes%Get(size(allc) + i))
+                    call fsIDs%Append(fsIDs%Get(size(allc) + i))
+
+                    ! Second segment
+                    startind = findloc(isnbface, .false., 1, back=.true.)
+
+                    ! Add this segment by adjusting existing contour
+                    alltpc(i)%isclosed = .false.
+                    alltpc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
+                    if (tscr(startind+1) == real(nstc, kind=R8)) then 
+                        call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                            [tscr(startind)], 'start', [-distfrac], .false., .true.)
+                    else
+                        ! Also need to delete last part
+                        call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                            [tscr(startind:startind+1)], 'both', [-distfrac, distfrac], .false., .true.)
+                    end if
+                    !alltpc(i)%x = alltpc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
+                    !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
+                    
+                end if 
+
+            else ! open contour with only one tangency point that is located at the start
                 ! Check which intersection is the last intersection with
                 ! the neighbouring boundary (should be first one)
                 intersectind = findloc(isnbface, .true., 1, back=.true.)
