@@ -9758,7 +9758,8 @@ module ggmod_topology2D
                                     if (.not. all(isedgealigned)) then 
                                         ! Consider only edges til first non-aligned edge
                                         isedgealigned(findloc(isedgealigned, .false., 1, back=.false.):) = .false.
-                                        if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
+                                        ! if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
+                                        if (.false.) then 
                                             ! Bounded by alpha -> override to case 2
                                             afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(1)) .or. &
                                                 (isedgealigned), .true., 1, back=.true.) ! go as far as possible
@@ -9801,7 +9802,8 @@ module ggmod_topology2D
                                     if (.not. all(isedgealigned)) then 
                                         ! Consider only edges til first non-aligned edge
                                         isedgealigned(:findloc(isedgealigned, .false., 1, back=.true.)) = .false.
-                                        if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then 
+                                        ! if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then
+                                        if (.false.) then  
                                             ! Bounded by alpha -> override to case 2
                                             afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(size(tx)-1)) .or. &
                                                 (isedgealigned), .true., 1, back=.false.) ! go as far as possible
