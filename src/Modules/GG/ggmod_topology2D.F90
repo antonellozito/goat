@@ -8612,20 +8612,25 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8)                             :: tf, ind
         integer(I8), allocatable, dimension(:)  :: tracetubes, tubeind, &
-            tubef, temps1, temps2, tubefID, sortind, faceind, tracefaces
+            tubef, temps1, temps2, tubefID, sortind, faceind, tracefaces, &
+            tubecell, tempind
         real(R8)                                :: lffval, hffval, &
             psimin, psimax, lrad
         real(R8), allocatable, dimension(:)     :: hftracex, lftracex, &
             hftracey, lftracey, x, y, fval, dpsi, dlrad, dval, &
             thispsi, thislrad, dlc, tracex, tracey, temp, s2r, tempx, &
-            tempy, temps1r, temps2r, xint, yint
-        logical                                 :: isstartlf
+            tempy, temps1r, temps2r, xint, yint, newx, newy
+        logical                                 :: isstartlf, wasfound
         logical, allocatable, dimension(:)      :: tracehf, tracelf, &
-            tracec, keepind, remf
+            tracec, keepind, remf, isincellpol
         type(ContourUDT), allocatable           :: allc(:), tempc(:)
+        type(PolygonUDT)                        :: cellpol
+        type(PolygonUDT), allocatable           :: allpc(:)
+        type(PolygonSetUDT)                     :: tempps
+        type(RealDynamicArrayUDT)               :: xcrda, ycrda
 
         ! Loop
-        integer(I8)                             :: i, j
+        integer(I8)                             :: i, j, k, cc
 
         ! Initialize
         !===========
@@ -8865,11 +8870,12 @@ module ggmod_topology2D
 
         ! For open contours, check which parts to keep (only parts that 
         ! intersect with the tube faces)
-        !$omp parallel do if (.not. omp_in_parallel()) & 
+        !$omp parallel do if ((.not. omp_in_parallel()) .and. .false.) & 
         !$omp default(none) &
         !$omp private(i, j, tubef, s2r, tubefID, xint, yint, tempx, &
         !$omp tempy, temps1, temps2, temps1r, temps2r, sortind, keepind, &
-        !$omp ind) &
+        !$omp ind, wasfound, tubecell, xcrda, ycrda, cellpol, cc, &
+        !$omp isincellpol, newx, newy, tempind) &
         !$omp shared(topomesh, tubeind, allc, faceind)
         do i = 1, size(allc)
             ! Get tube faces
@@ -8919,9 +8925,15 @@ module ggmod_topology2D
             if (allc(i)%isclosed .and. .not. topomesh%tube%isclosed(tubeind(i))) then
                 ! closed contour for open tube - need to check differently. 
                 ! Normally, the first and last intersection should be exactly
-                ! in a tube face, since we trace from there. Therefore, 
-                ! we can normally apply the same algorithm as an open
-                ! contour. 
+                ! in a tube face, since we trace from there. Since we
+                ! only computed intersections with the current tube,
+                ! there should be two segments that start at one tube 
+                ! face and end in the other (errors are thrown otherwise)
+                ! Of these two pieces, at least one should not lie 
+                ! inside the tube polygon. This is checked by forming for
+                ! one cell of the tube the cell polygon and checking if
+                ! any vertices of the contour segment (except start/end) 
+                ! are inside the cell polygon. 
                 
                 ! Print message
                 print *, 'SplitTMTubesTA: closed contour for ' // & 
@@ -8935,35 +8947,75 @@ module ggmod_topology2D
                         'unexpected since tracing should start from face')
                 end if 
 
-                ! Check which ones to keep
-                do j = 1, size(s2r)
-                    if (j > 1) then 
-                        if (tubefID(j-1) == faceind(i)) then 
-                            keepind(j) = .true.
-                        end if 
-                    end if
-                    if (j < size(s2r)) then 
-                        if (tubefID(j+1) == faceind(i)) then 
-                            keepind(j) = .true.
-                        end if 
-                    end if
-                    if (tubefID(j) == faceind(i)) then 
-                        keepind(j) = .true.
-                    end if 
-                end do
+                ! Construct the cell polygon
+                tubecell = topomesh%tube%GetCell(tubeind(i))
+                call ConstructTopologicalMeshCellPolygon(topomesh, &
+                    tubecell(1), xcrda, ycrda)
+                call cellpol%Construct(xcrda%Get(), ycrda%Get())
 
-                ! Remove
-                s2r = pack(s2r, keepind)
-                xint = pack(xint, keepind)
-                yint = pack(yint, keepind)
+                ! Loop over all segments
+                cc = 0
+                wasfound = .false. 
+                do j = 1, size(s2r)-1
+                    ! Check if this segment should be considered
+                    if (((tubefID(j) == tubef(1)) .and. (tubefID(j+1) == tubef(2))) .or. &
+                        ((tubefID(j) == tubef(2)) .and. (tubefID(j+1) == tubef(1)))) then 
+                            
+                        ! Update the counter
+                        cc = cc + 1
+
+                        ! Extract the segment coordinates without end points
+                        tempind = [(k, k = 1, size(allc(i)%x))]
+                        tempind = pack(tempind, (tempind > s2r(j)+1.0_R8) .and. &
+                            (tempind < s2r(j+1)+1.0_R8))
+                        tempx = [allc(i)%x(tempind)]
+                        tempy = [allc(i)%y(tempind)]
+
+                        ! Check sizes
+                        if (size(tempx) == 0) then 
+                            ! Need to refine a bit
+                            print *, 'SplitTMTubesTA: closed contour segment ' // & 
+                                'does not have any vertices in between, attempting ' // & 
+                                'to refine (results may be inaccurate...)'
+                            tempx = real([(k, k = 0, 3)], kind=R8)/3.0_R8*(xint(j+1) - xint(j)) + xint(j)
+                            tempy = real([(k, k = 0, 3)], kind=R8)/3.0_R8*(yint(j+1) - yint(j)) + yint(j)
+                            tempx = tempx(2:size(tempx)-1)
+                            tempy = tempy(2:size(tempy)-1)
+                        end if 
+
+                        ! Check if there are any vertices in the cell polygon
+                        call Inpolygon(cellpol, tempx, tempy, isincellpol)
+                        if (any(isincellpol)) then 
+                            ! Check if already found a segment
+                            if (wasfound) then 
+                                call gdErrorHandler('SplitTMTubesTA: ' // & 
+                                    'both segments appear to be located ' // &
+                                    'inside of tube, unexpected')
+                            end if 
+                            wasfound = .true.
+                            newx = [xint(j), tempx, xint(j+1)] 
+                            newy = [yint(j), tempy, yint(j+1)]
+                        end if 
+                    end if
+                end do 
+
+                ! Sanity check: should've found two segments
+                if (cc /= 2) then 
+                    call gdErrorHandler('SplitTMTubesTA: closed contour ' // & 
+                        'did not have two segments as expected, this may be a bug')
+                end if 
+
+                ! Sanity check: should've found a segment that lies within
+                ! the polygon cell
+                if (.not. wasfound) then 
+                    call gdErrorHandler('SplitTMTubesTA: could not find ' // & 
+                        'a closed contour segment that lies within the tube')
+                end if 
+
 
                 ! Keep only part inbetween intersections
-                allc(i)%x = [xint(minloc(s2r, 1)), &
-                    allc(i)%x(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
-                    xint(maxloc(s2r, 1))]
-                allc(i)%y = [yint(minloc(s2r, 1)), &
-                    allc(i)%y(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
-                    yint(maxloc(s2r, 1))]
+                allc(i)%x = newx
+                allc(i)%y = newy
 
             elseif (allc(i)%isclosed .and. topomesh%tube%isclosed(tubeind(i))) then 
                 ! Should be fine, nothing to check
@@ -9010,6 +9062,12 @@ module ggmod_topology2D
 
         ! Add contours 
         !=============
+        allocate(allpc(size(allc)))
+        do i = 1, size(allc)
+            call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+        end do 
+        call tempps%Construct(allpc)
+        call tempps%WriteData('splitcontours_all_beforeinsertion')
         do i = 1, size(allc)
             ! Insert
             call InsertTopologicalMeshContour(topomesh, tmadaptor%magneticField, &
