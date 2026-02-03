@@ -1770,7 +1770,7 @@ module ggmod_topology2D
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
         ! Auxiliary
-        real(R8)                                :: dist, startsr, endsr
+        real(R8)                                :: startsr, endsr
         real(R8), allocatable, dimension(:)     :: pspx, pspy, pspf, &
             xout, yout, iout, jout, tscr, tsfr, tx, ty, tsrfh, tsrsh
         integer(I8)                             :: npsp, &
@@ -1781,7 +1781,7 @@ module ggmod_topology2D
             tsf, tcontourind, tcstartind, tcendind
         logical                                 :: intfacestart, &
             intcstart, dointersect
-        logical, allocatable, dimension(:)      :: tracepoints, keepind, &
+        logical, allocatable, dimension(:)      :: tracepoints, &
             ispseudosaddlepoint, isnbface, rmind, isstartingcontour, &
             isendingcontour
 
@@ -2086,10 +2086,6 @@ module ggmod_topology2D
         !----------------------------
         ! First, trace all contours
         allocate(alltpc(0))
-        !$omp parallel do default(none) private(i, k, tc, keepind, dist) & 
-        !$omp shared(fieldtracer, pspx, pspy, psptype, npsp, tracepoints, &
-        !$omp alltpc, curvetypes, fsIDs, pspid) & 
-        !$omp schedule(dynamic)
         do i = 1, npsp
             if ((psptype(i) == TMvertextp2ID) .and. tracepoints(i)) then 
                 ! Trace contour
@@ -2098,51 +2094,40 @@ module ggmod_topology2D
                 ! Process
                 call CleanContours(tc)
 
-                ! Checks
-                allocate(keepind(size(tc)))
-                keepind = .true.
+                ! Check if the tangency point is connected to any other
+                ! points (we include the current point because that doesn't matter)
+                ! These points should not be traced anymore because the
+                ! contour algorithm should've gone through all of them
                 do k = 1, size(tc)
-                    ! Is the starting point the actual given start point? (should
-                    ! be exactly the same since added as starting point in the
-                    ! contouring algorithm)
-                    dist = sqrt((tc(k)%x(1) - pspx(i))**2 + (tc(k)%y(1) - pspy(i))**2)
-                    if (dist > 0.0_R8) then 
-                        print *, 'AddTopologicalMEshContours: tangency ' // & 
-                            'contour segment found that does not start ' // & 
-                            'in given tangency point. Removing...'
-                        keepind(k) = .false.
-                    end if
-                    if (tc(k)%startsaddle /= pspID(i)) then
-                        ! Normally this should come from the contour 
-                        ! tracer, but we can add it afterwards as well 
-                        print *, 'AddTopologicalMeshContours: tangency ' // &
-                            'contour segment found that starts in given ' // & 
-                            'tangency point, but that does not have the ' // &
-                            'starting saddle point ID as tangency point. ' // & 
-                            'adjusting starting ID...'
-                        tc(k)%startsaddle = pspID(i)
+                    if (tc(k)%startsaddle /= 0) then 
+                        tracepoints(tc(k)%startsaddle) = .false. 
                     end if 
-                    if (tc(k)%isclosed .and. (tc(k)%endsaddle /= pspID(i))) then 
-                        ! Ensure start and end saddle point are the same
-                        tc(k)%endsaddle = pspID(i)
+                    if (tc(k)%endsaddle /= 0) then 
+                        tracepoints(tc(k)%endsaddle) = .false. 
+                    end if 
+                end do 
+
+                ! Sanity checks
+                do k = 1, size(tc)
+                    ! Is at least one of both end points a saddle point? 
+                    ! If not, throw an error, this shouldn't happen
+                    if (tc(k)%startsaddle == 0 .and. tc(k)%endsaddle == 0) then 
+                        call WriteTopologicalMesh(topomesh, 'topomesh_error')
+                        call gdErrorHandler('AddTopologicalMeshContours: ' // & 
+                            'tangency point contour detected that does not start ' // & 
+                            'or end in any topomesh vertex, this is likely a bug. ' // & 
+                            'Current topomesh written in topomesh_error.dat')
                     end if 
                 end do
 
-                ! Remove
-                tc = pack(tc, keepind)
-                deallocate(keepind)
-
                 ! Add
-                !$omp critical
                 alltpc = [alltpc, tc]
                 call curvetypes%Append(spread(TMfacepolID, 1, size(tc)))
                 
                 ! Add flux surface ID
                 call fsIDs%Append(spread(i, 1, size(tc)))
-                !$omp end critical
             end if 
         end do 
-        !$omp end parallel do 
 
         ! Compute all intersections with other faces
         ntpc = size(alltpc)
@@ -2230,6 +2215,10 @@ module ggmod_topology2D
             isnbface = .false.
             do j = 1, nint
                 if (any(topomesh%face%vert(tfaceind(j), :) == alltpc(i)%startsaddle)) then 
+                    isnbface(j) = .true.
+                end if 
+                if (any(topomesh%face%vert(tfaceind(j), :) == alltpc(i)%endsaddle) .and. &
+                    alltpc(i)%endsaddle /= 0) then 
                     isnbface(j) = .true.
                 end if 
             end do             
@@ -2352,8 +2341,122 @@ module ggmod_topology2D
                     !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
                     
                 end if 
+            elseif (alltpc(i)%startsaddle /= 0 .and. alltpc(i)%endsaddle /= 0) then  ! open contour segment but with two tangency points
+                if (all(isnbface)) then 
+                    ! No intersections with other boundaries
+                    if (nint == 2) then 
+                        ! Simply in start and end - add full contour, so 
+                        ! do nothing
+                    else
+                        ! Here, we don't have much more to go on than 
+                        ! assuming that these intersections are somewhere
+                        ! in the start/end nodes of the contour and that
+                        ! we can partition based on that. This is of course
+                        ! not a general way and may fail if the amount of
+                        ! contour points is too low
+                        ! Print a warning
+                        print *, 'AddTopologicalMeshContours: multiple ' // & 
+                            'intersections found for closed contour with ' // & 
+                            'only neighbouring boundary faces, attempting to ' // &
+                            'split contour by partitioning intersection into ' // & 
+                            'intersections at start and end. This may not result ' // & 
+                            'in desired behavior... (vertex: ', alltpc(i)%startsaddle, ')'
 
-            else ! open contour
+                        ! Determine start & end intersections
+                        allocate(vindIfh(count(tsc < nstc/2)), &
+                            vindIsh(count(tsc >= nstc/2)))
+                        allocate(tsrfh(size(vindIfh)), tsrsh(size(vindIsh)))
+                        vindIfh = pack(tsc, tsc < nstc/2)
+                        vindIsh = pack(tsc, tsc >= nstc/2)
+                        tsrfh = pack(tscr, tsc < nstc/2)
+                        tsrsh = pack(tscr, tsc >= nstc/2)
+
+                        ! Determine start index
+                        if (size(vindIfh) > 0) then 
+                            startind = maxval(vindIfh)
+                            startsr = maxval(tsrfh)
+                        else
+                            startind = 2
+                            startsr = 0.0_R8
+                        end if 
+
+                        ! Determine end index
+                        if (size(vindIsh) > 0) then 
+                            endind = minval(vindIsh)+1
+                            endsr = minval(tsrsh)
+                        else
+                            endind = nstc
+                            endsr = real(nstc, kind=R8)
+                        end if 
+                        
+                        ! Adjust contour
+                        if (startsr /= 0.0_R8 .and. endsr /= real(nstc, kind=R8)) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [startsr, endsr], 'both', [distfrac, distfrac], .true., .true.)
+                        elseif (startsr /= 0.0_R8) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [startsr], 'start', [distfrac, distfrac], .true., .true.)
+                        elseif (endsr /= real(nstc, kind=R8)) then 
+                            call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                                [endsr], 'end', [distfrac, distfrac], .true., .true.)
+                        end if 
+                        !alltpc(i)%x = alltpc(i)%x([1, (k, k = startind, endind), nstc+1])
+                        !alltpc(i)%y = alltpc(i)%y([1, (k, k = startind, endind), nstc+1])
+
+                        ! Housekeeping
+                        deallocate(vindIfh, vindIsh, tsrfh, tsrsh)
+                    end if
+                else
+                    ! At least one intersection with another boundary. 
+                    ! Note: here we do want to keep the intersection 
+                    ! with these other boundaries in the contour!
+                    ! Need to find first and second segment 
+
+                    ! First segment
+                    endind = findloc(isnbface, .false., 1, back=.false.)
+
+                    ! Add this segment as additional contour
+                    alltpc = [alltpc, alltpc(i)]
+                    indtpc = size(alltpc)
+                    alltpc(indtpc)%isclosed = .false.
+                    alltpc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
+                    if (tscr(endind-1) == 0.0_R8) then 
+                        call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                            [tscr(endind)], 'end', [-distfrac], .true., .false.)
+                    else
+                        ! Also need to delete a first part
+                        call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                            [tscr(endind-1:endind)], 'both', [distfrac, -distfrac], .true., .false.)
+                    end if 
+                    !call DeleteCurveSegment(alltpc(indtpc)%x, alltpc(indtpc)%y, &
+                    !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
+                    !alltpc(indtpc)%x = alltpc(i)%x([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
+                    !alltpc(indtpc)%y = alltpc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
+
+                    ! Append flux surface ID etc as well!
+                    call curvetypes%Append(curvetypes%Get(size(allc) + i))
+                    call fsIDs%Append(fsIDs%Get(size(allc) + i))
+
+                    ! Second segment
+                    startind = findloc(isnbface, .false., 1, back=.true.)
+
+                    ! Add this segment by adjusting existing contour
+                    alltpc(i)%isclosed = .false.
+                    alltpc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
+                    if (tscr(startind+1) == real(nstc, kind=R8)) then 
+                        call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                            [tscr(startind)], 'start', [-distfrac], .false., .true.)
+                    else
+                        ! Also need to delete last part
+                        call DeleteCurveSegment(alltpc(i)%x, alltpc(i)%y, &
+                            [tscr(startind:startind+1)], 'both', [-distfrac, distfrac], .false., .true.)
+                    end if
+                    !alltpc(i)%x = alltpc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
+                    !alltpc(i)%y = alltpc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
+                    
+                end if 
+
+            else ! open contour with only one tangency point that is located at the start
                 ! Check which intersection is the last intersection with
                 ! the neighbouring boundary (should be first one)
                 intersectind = findloc(isnbface, .true., 1, back=.true.)
@@ -2610,12 +2713,14 @@ module ggmod_topology2D
         ! Clean the contours (just to be sure)
         call CleanContours(allc)
 
-        allocate(allpc(size(allc)))
-        do i = 1, size(allc)
-            call allpc(i)%Construct(allc(i)%x, allc(i)%y)
-        end do 
-        call tempps%Construct(allpc)
-        call tempps%WriteData('topocontours_all_beforeinsertion')
+        if (options%writedebugoutput) then 
+            allocate(allpc(size(allc)))
+            do i = 1, size(allc)
+                call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+            end do 
+            call tempps%Construct(allpc)
+            call tempps%WriteData('topocontours_all_beforeinsertion')
+        end if
 
         ! Add the contours
         allcurvetypes = curvetypes%Get()
@@ -8509,20 +8614,25 @@ module ggmod_topology2D
         ! Auxiliary
         integer(I8)                             :: tf, ind
         integer(I8), allocatable, dimension(:)  :: tracetubes, tubeind, &
-            tubef, temps1, temps2, tubefID, sortind, faceind, tracefaces
+            tubef, temps1, temps2, tubefID, sortind, faceind, tracefaces, &
+            tubecell, tempind
         real(R8)                                :: lffval, hffval, &
             psimin, psimax, lrad
         real(R8), allocatable, dimension(:)     :: hftracex, lftracex, &
             hftracey, lftracey, x, y, fval, dpsi, dlrad, dval, &
             thispsi, thislrad, dlc, tracex, tracey, temp, s2r, tempx, &
-            tempy, temps1r, temps2r, xint, yint
-        logical                                 :: isstartlf
+            tempy, temps1r, temps2r, xint, yint, newx, newy
+        logical                                 :: isstartlf, wasfound
         logical, allocatable, dimension(:)      :: tracehf, tracelf, &
-            tracec, keepind, remf
+            tracec, keepind, remf, isincellpol
         type(ContourUDT), allocatable           :: allc(:), tempc(:)
+        type(PolygonUDT)                        :: cellpol
+        type(PolygonUDT), allocatable           :: allpc(:)
+        type(PolygonSetUDT)                     :: tempps
+        type(RealDynamicArrayUDT)               :: xcrda, ycrda
 
         ! Loop
-        integer(I8)                             :: i, j
+        integer(I8)                             :: i, j, k, cc
 
         ! Initialize
         !===========
@@ -8766,7 +8876,8 @@ module ggmod_topology2D
         !$omp default(none) &
         !$omp private(i, j, tubef, s2r, tubefID, xint, yint, tempx, &
         !$omp tempy, temps1, temps2, temps1r, temps2r, sortind, keepind, &
-        !$omp ind) &
+        !$omp ind, wasfound, tubecell, xcrda, ycrda, cellpol, cc, &
+        !$omp isincellpol, newx, newy, tempind) &
         !$omp shared(topomesh, tubeind, allc, faceind)
         do i = 1, size(allc)
             ! Get tube faces
@@ -8816,13 +8927,15 @@ module ggmod_topology2D
             if (allc(i)%isclosed .and. .not. topomesh%tube%isclosed(tubeind(i))) then
                 ! closed contour for open tube - need to check differently. 
                 ! Normally, the first and last intersection should be exactly
-                ! in a tube face, since we trace from there. Therefore, 
-                ! we can normally apply the same algorithm as an open
-                ! contour. 
-                
-                ! Print message
-                print *, 'SplitTMTubesTA: closed contour for ' // & 
-                    'open tube detected, code not yet verified'
+                ! in a tube face, since we trace from there. Since we
+                ! only computed intersections with the current tube,
+                ! there should be two segments that start at one tube 
+                ! face and end in the other (errors are thrown otherwise)
+                ! Of these two pieces, at least one should not lie 
+                ! inside the tube polygon. This is checked by forming for
+                ! one cell of the tube the cell polygon and checking if
+                ! any vertices of the contour segment (except start/end) 
+                ! are inside the cell polygon. 
 
                 ! Checks
                 if ((s2r(1) /= 0.0_R8) .or. (s2r(size(s2r)) /= size(allc(i)%x)-1)) then 
@@ -8832,35 +8945,75 @@ module ggmod_topology2D
                         'unexpected since tracing should start from face')
                 end if 
 
-                ! Check which ones to keep
-                do j = 1, size(s2r)
-                    if (j > 1) then 
-                        if (tubefID(j-1) == faceind(i)) then 
-                            keepind(j) = .true.
-                        end if 
-                    end if
-                    if (j < size(s2r)) then 
-                        if (tubefID(j+1) == faceind(i)) then 
-                            keepind(j) = .true.
-                        end if 
-                    end if
-                    if (tubefID(j) == faceind(i)) then 
-                        keepind(j) = .true.
-                    end if 
-                end do
+                ! Construct the cell polygon
+                tubecell = topomesh%tube%GetCell(tubeind(i))
+                call ConstructTopologicalMeshCellPolygon(topomesh, &
+                    tubecell(1), xcrda, ycrda)
+                call cellpol%Construct(xcrda%Get(), ycrda%Get())
 
-                ! Remove
-                s2r = pack(s2r, keepind)
-                xint = pack(xint, keepind)
-                yint = pack(yint, keepind)
+                ! Loop over all segments
+                cc = 0
+                wasfound = .false. 
+                do j = 1, size(s2r)-1
+                    ! Check if this segment should be considered
+                    if (((tubefID(j) == tubef(1)) .and. (tubefID(j+1) == tubef(2))) .or. &
+                        ((tubefID(j) == tubef(2)) .and. (tubefID(j+1) == tubef(1)))) then 
+                            
+                        ! Update the counter
+                        cc = cc + 1
+
+                        ! Extract the segment coordinates without end points
+                        tempind = [(k, k = 1, size(allc(i)%x))]
+                        tempind = pack(tempind, (tempind > s2r(j)+1.0_R8) .and. &
+                            (tempind < s2r(j+1)+1.0_R8))
+                        tempx = [allc(i)%x(tempind)]
+                        tempy = [allc(i)%y(tempind)]
+
+                        ! Check sizes
+                        if (size(tempx) == 0) then 
+                            ! Need to refine a bit
+                            print *, 'SplitTMTubesTA: closed contour segment ' // & 
+                                'does not have any vertices in between, attempting ' // & 
+                                'to refine (results may be inaccurate...)'
+                            tempx = real([(k, k = 0, 3)], kind=R8)/3.0_R8*(xint(j+1) - xint(j)) + xint(j)
+                            tempy = real([(k, k = 0, 3)], kind=R8)/3.0_R8*(yint(j+1) - yint(j)) + yint(j)
+                            tempx = tempx(2:size(tempx)-1)
+                            tempy = tempy(2:size(tempy)-1)
+                        end if 
+
+                        ! Check if there are any vertices in the cell polygon
+                        call Inpolygon(cellpol, tempx, tempy, isincellpol)
+                        if (any(isincellpol)) then 
+                            ! Check if already found a segment
+                            if (wasfound) then 
+                                call gdErrorHandler('SplitTMTubesTA: ' // & 
+                                    'both segments appear to be located ' // &
+                                    'inside of tube, unexpected')
+                            end if 
+                            wasfound = .true.
+                            newx = [xint(j), tempx, xint(j+1)] 
+                            newy = [yint(j), tempy, yint(j+1)]
+                        end if 
+                    end if
+                end do 
+
+                ! Sanity check: should've found two segments
+                if (cc /= 2) then 
+                    call gdErrorHandler('SplitTMTubesTA: closed contour ' // & 
+                        'did not have two segments as expected, this may be a bug')
+                end if 
+
+                ! Sanity check: should've found a segment that lies within
+                ! the polygon cell
+                if (.not. wasfound) then 
+                    call gdErrorHandler('SplitTMTubesTA: could not find ' // & 
+                        'a closed contour segment that lies within the tube')
+                end if 
+
 
                 ! Keep only part inbetween intersections
-                allc(i)%x = [xint(minloc(s2r, 1)), &
-                    allc(i)%x(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
-                    xint(maxloc(s2r, 1))]
-                allc(i)%y = [yint(minloc(s2r, 1)), &
-                    allc(i)%y(ceiling(minval(s2r))+1:floor(maxval(s2r))+1), &
-                    yint(maxloc(s2r, 1))]
+                allc(i)%x = newx
+                allc(i)%y = newy
 
             elseif (allc(i)%isclosed .and. topomesh%tube%isclosed(tubeind(i))) then 
                 ! Should be fine, nothing to check
@@ -8907,6 +9060,14 @@ module ggmod_topology2D
 
         ! Add contours 
         !=============
+        if (options%writedebugoutput) then 
+            allocate(allpc(size(allc)))
+            do i = 1, size(allc)
+                call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+            end do 
+            call tempps%Construct(allpc)
+            call tempps%WriteData('splitcontours_all_beforeinsertion')
+        end if 
         do i = 1, size(allc)
             ! Insert
             call InsertTopologicalMeshContour(topomesh, tmadaptor%magneticField, &
@@ -9432,34 +9593,38 @@ module ggmod_topology2D
 
         ! Auxiliary
         logical                                 :: markface, ishftp(1:2), &
-            hasnewfsIDnb1, hasnewfsIDnb2
+            hasnewfsIDnb1, hasnewfsIDnb2, wasfound
         logical, allocatable, dimension(:)      :: vertexmark, facemark, &
             isedgealigned, isentirefacealigned, remf, keepc, isstartface, &
-            isalphapos, overridetubecase, remv
+            isalphapos, overridetubecase, remv, keepf, isincellpol
         integer(I8)                             :: thisf, tubecase, nfs, &
-            ntpc, nint, nstc, startind, endind, indtpc, intersectind, &
-            insertloc, tfmarktraceind(1:2)
+            ntpc, nint, nstc, intersectind, insertloc, tfmarktraceind(1:2)
         integer(I8), allocatable, dimension(:)  :: tf, tfbnd, afstartind, &
             afendind, tfmark, facevert, tfnb1, tfnb2, newfsIDs,  &
             markedtpIDs, sortind, vindI, vindJ, tsc, tfaceind, &
             vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override, tvf, &
-            tvmark
+            tvmark, tubeID, tubecell, tubef, tempind
         real(R8)                                :: avpminangle, tdl
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
             xout, yout, iout, jout, tscr, dl, dlsum, thisx, thisy, &
-            cosalpha, sinalpha, alphasigned, fval, dfval, tpsinew
+            cosalpha, sinalpha, alphasigned, fval, dfval, tpsinew, &
+            xint, yint, tempx, tempy, newx, newy
 
         type(ContourUDT), allocatable           :: tempc(:), allc(:)
         type(IntegerDynamicArrayUDT)            :: fsIDs, curvetypes, &
             cface, mergefsID
         type(IntegerDynamicArrayUDT), allocatable, dimension(:)     :: &
             sc, sf, faceind, contourind
+        type(RealDynamicArrayUDT)               :: xcrda, ycrda
         type(RealDynamicArrayUDT), allocatable, dimension(:)        :: &
-            sfr, scr
+            sfr, scr, xintrda, yintrda
+        type(PolygonUDT)                        :: cellpol
+        type(PolygonUDT), allocatable           :: allpc(:)
+        type(PolygonSetUDT)                     :: tempps
         
         ! Loop
-        integer(I8)                             :: i, j, k
+        integer(I8)                             :: i, j, k, cc
 
         ! Initialize
         !===========
@@ -9593,7 +9758,8 @@ module ggmod_topology2D
                                     if (.not. all(isedgealigned)) then 
                                         ! Consider only edges til first non-aligned edge
                                         isedgealigned(findloc(isedgealigned, .false., 1, back=.false.):) = .false.
-                                        if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
+                                        ! if (findloc(isedgealigned, .false., 1, back=.false.) > afendind(thisf)) then 
+                                        if (.false.) then 
                                             ! Bounded by alpha -> override to case 2
                                             afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(1)) .or. &
                                                 (isedgealigned), .true., 1, back=.true.) ! go as far as possible
@@ -9636,7 +9802,8 @@ module ggmod_topology2D
                                     if (.not. all(isedgealigned)) then 
                                         ! Consider only edges til first non-aligned edge
                                         isedgealigned(:findloc(isedgealigned, .false., 1, back=.true.)) = .false.
-                                        if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then 
+                                        ! if (findloc(isedgealigned, .false., 1, back=.true.)+1 < afendind(thisf)) then
+                                        if (.false.) then  
                                             ! Bounded by alpha -> override to case 2
                                             afendind(thisf) = findloc((isalphapos .eqv. .not. isalphapos(size(tx)-1)) .or. &
                                                 (isedgealigned), .true., 1, back=.false.) ! go as far as possible
@@ -9680,7 +9847,7 @@ module ggmod_topology2D
         ! Trace contours
         !===============
         ! Trace depending on tube case
-        allocate(allc(0))
+        allocate(allc(0), tubeID(0))
         do i = 1, tube%ntot 
             ! Get tube radial faces
             tf = GetTMTubeFace(tube, i)
@@ -9763,6 +9930,9 @@ module ggmod_topology2D
                     call fsIDs%Append(spread(nfs, 1, size(tempc)))
                     call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                     call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                    ! Add tube ID of contours
+                    tubeID = [tubeID, spread(i, 1, size(tempc))]
                 else
                     ! Second vertex is start
                     tempc = fieldtracer%TraceContours(&
@@ -9773,7 +9943,12 @@ module ggmod_topology2D
                     call fsIDs%Append(spread(nfs, 1, size(tempc)))
                     call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                     call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                    ! Add tube ID of contours
+                    tubeID = [tubeID, spread(i, 1, size(tempc))]
                 end if 
+
+                
 
             case (2) 
                 
@@ -9834,6 +10009,9 @@ module ggmod_topology2D
                 call fsIDs%Append(spread(nfs, 1, size(tempc)))
                 call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                 call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                ! Add tube ID of contours
+                tubeID = [tubeID, spread(i, 1, size(tempc))]
 
 
             case (3)
@@ -9930,6 +10108,9 @@ module ggmod_topology2D
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
                         call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                         call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                        ! Add tube ID of contours
+                        tubeID = [tubeID, spread(i, 1, size(tempc))]
                     else
                         tempc = fieldtracer%TraceContours(&
                             [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
@@ -9939,6 +10120,9 @@ module ggmod_topology2D
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
                         call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                         call cface%Append(spread(tfmark(2), 1, size(tempc)))
+
+                        ! Add tube ID of contours
+                        tubeID = [tubeID, spread(i, 1, size(tempc))]
                     end if
                 elseif (.not. any(ishftp)) then 
                     ! Take highest psi value
@@ -9951,6 +10135,9 @@ module ggmod_topology2D
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
                         call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                         call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                        ! Add tube ID of contours
+                        tubeID = [tubeID, spread(i, 1, size(tempc))]
                     else
                         tempc = fieldtracer%TraceContours(&
                             [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
@@ -9960,6 +10147,9 @@ module ggmod_topology2D
                         call fsIDs%Append(spread(nfs, 1, size(tempc)))
                         call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                         call cface%Append(spread(tfmark(2), 1, size(tempc)))
+
+                        ! Add tube ID of contours
+                        tubeID = [tubeID, spread(i, 1, size(tempc))]
                     end if
                 else
                     ! Lowest and highest, need to check overlap
@@ -9996,6 +10186,10 @@ module ggmod_topology2D
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
                             call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                             call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                            ! Add tube ID of contours
+                            tubeID = [tubeID, spread(i, 1, size(tempc))]
+
                             tempc = fieldtracer%TraceContours(&
                                 [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
                                 [face%y(tfmark(2))%Get(tfmarktraceind(2))])
@@ -10004,6 +10198,9 @@ module ggmod_topology2D
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
                             call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                             call cface%Append(spread(tfmark(2), 1, size(tempc)))
+
+                            ! Add tube ID of contours
+                            tubeID = [tubeID, spread(i, 1, size(tempc))]
                         end if 
                     else
                         ! Second is highest
@@ -10038,6 +10235,10 @@ module ggmod_topology2D
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
                             call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                             call cface%Append(spread(tfmark(1), 1, size(tempc)))
+
+                            ! Add tube ID of contours
+                            tubeID = [tubeID, spread(i, 1, size(tempc))]
+
                             tempc = fieldtracer%TraceContours(&
                                 [face%x(tfmark(2))%Get(tfmarktraceind(2))], &
                                 [face%y(tfmark(2))%Get(tfmarktraceind(2))])
@@ -10046,6 +10247,9 @@ module ggmod_topology2D
                             call fsIDs%Append(spread(nfs, 1, size(tempc)))
                             call curvetypes%Append(spread(TMfacepolID, 1, size(tempc)))
                             call cface%Append(spread(tfmark(2), 1, size(tempc)))
+
+                            ! Add tube ID of contours
+                            tubeID = [tubeID, spread(i, 1, size(tempc))]
                         end if 
                     end if 
                 end if 
@@ -10085,10 +10289,13 @@ module ggmod_topology2D
         keepc = .true.
         ntpc = size(allc)
         allocate(sc(ntpc), scr(ntpc), faceind(ntpc), sf(topomesh%face%ntot), &
-            sfr(topomesh%face%ntot), contourind(topomesh%face%ntot))
+            sfr(topomesh%face%ntot), contourind(topomesh%face%ntot), &
+            xintrda(ntpc), yintrda(ntpc))
         do i = 1, ntpc
             sc(i) = ConstructIntegerDynamicArray()
             scr(i) = ConstructRealDynamicArray()
+            xintrda(i) = ConstructRealDynamicArray()
+            yintrda(i) = ConstructRealDynamicArray()
             faceind(i) = ConstructIntegerDynamicArray()
         end do 
         do i = 1, topomesh%face%ntot
@@ -10101,7 +10308,8 @@ module ggmod_topology2D
         !$omp parallel do default(none) &
         !$omp schedule(dynamic) collapse(2) & 
         !$omp private(xout, yout, vindI, vindJ, iout, jout) & 
-        !$omp shared(ntpc, topomesh, allc, sc, scr, faceind, sf, sfr, contourind)
+        !$omp shared(ntpc, topomesh, allc, sc, scr, faceind, sf, sfr, &
+        !$omp contourind, xintrda, yintrda)
         do i = 1, ntpc
             do j = 1, topomesh%face%ntot
                 if (topomesh%face%type(j) == TMfacebndID) then ! Do we also need to check for aligned bnd?
@@ -10117,6 +10325,8 @@ module ggmod_topology2D
                             ! Add intersection data to contour
                             call sc(i)%Append(vindI)
                             call scr(i)%Append(iout)
+                            call xintrda(i)%Append(xout)
+                            call yintrda(i)%Append(yout)
                             call faceind(i)%Append(spread(j, 1, size(vindI)))
 
                             ! Add intersection data to face
@@ -10137,6 +10347,8 @@ module ggmod_topology2D
             tsc = sc(i)%Get()
             tfaceind = faceind(i)%Get()
             tscr = scr(i)%Get()
+            xint = xintrda(i)%Get()
+            yint = yintrda(i)%Get()
             nint = size(tsc)
             nstc = size(allc(i)%x)-1
 
@@ -10144,6 +10356,8 @@ module ggmod_topology2D
             sortind = [(k, k = 1, nint)]
             call Sort(tscr, ind=sortind, ascend=.true.)
             tsc = tsc(sortind)
+            xint = xint(sortind)
+            yint = yint(sortind)
             tfaceind = tfaceind(sortind)
 
             ! Check
@@ -10165,7 +10379,36 @@ module ggmod_topology2D
 
             ! Determine which part(s) of contour(s) to keep
             if (allc(i)%isclosed) then ! closed contour
-                ! This is much more tricky, need to check additional cases
+                ! closed contour for open tube - need to check differently. 
+                ! Normally, the first and last intersection should be exactly
+                ! in a tube face, since we trace from there. Since we
+                ! only computed intersections with the current tube,
+                ! there should be two segments that start at one tube 
+                ! face and end in the other (errors are thrown otherwise)
+                ! Of these two pieces, at least one should not lie 
+                ! inside the tube polygon. This is checked by forming for
+                ! one cell of the tube the cell polygon and checking if
+                ! any vertices of the contour segment (except start/end) 
+                ! are inside the cell polygon. 
+                
+                ! Print message
+                print *, 'InsertAlignedVesselParts: closed contour for ' // & 
+                    'open tube detected, code not yet verified'
+
+                ! Keep only intersections that intersect in one of the 
+                ! tube's radial faces
+                tf = topomesh%tube%GetFace(tubeID(i))
+                tubef = [tf(1), tf(size(tf))]
+                allocate(keepf(size(tfaceind)))
+                keepf = .false. 
+                where (tfaceind == tubef(1) .or. tfaceind == tubef(2)) keepf = .true. 
+                tscr = pack(tscr, keepf)
+                xint = pack(xint, keepf)
+                yint = pack(yint, keepf)
+                tfaceind = pack(tfaceind, keepf)
+                deallocate(keepf)
+
+                ! Sanity check
                 if (all(isstartface)) then 
                     ! No intersections with other boundaries - this should
                     ! not occur!
@@ -10173,58 +10416,87 @@ module ggmod_topology2D
                     call gdErrorHandler('InsertAlignedVesselParts: ' // & 
                         'detected closed contour that only intersects in ' // & 
                         'starting face - unexpected')
-                else
-                    ! At least one intersection with another boundary. 
-                    ! Note: here we do want to keep the intersection 
-                    ! with these other boundaries in the contour!
-                    ! Need to find first and second segment 
-                    print *, 'InsertAlignedVesselParts: code not yet verified'
-                    ! First segment
-                    endind = findloc(isstartface, .false., 1, back=.false.)
-
-                    ! Add this segment as additional contour
-                    allc = [allc, allc(i)]
-                    indtpc = size(allc)
-                    allc(indtpc)%isclosed = .false.
-                    allc(indtpc)%endsaddle = 0 ! doesn't end anymore in saddle point
-                    if (tscr(endind-1) == 0.0_R8) then 
-                        call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                            [tscr(endind)], 'end', [-0*distfrac], .true., .false.)
-                    else
-                        ! Also need to delete a first part - and delete the first vertex
-                        allc(indtpc)%startsaddle = 0
-                        call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                            [tscr(endind-1:endind)], 'both', [0*distfrac, -0*distfrac], .false., .false.)
-                    end if 
-                    !call DeleteCurveSegment(allc(indtpc)%x, allc(indtpc)%y, &
-                    !    [tscr(endind)], 'end', [0.0_R8], .true., .false.)
-                    !allc(indtpc)%x = allc(i)%x([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
-                    !allc(indtpc)%y = allc(i)%y([1, (k, k = tsc(startind-1)+1, tsc(startind)+1)])
-
-                    ! Append flux surface ID etc as well!
-                    call curvetypes%Append(curvetypes%Get(i))
-                    call fsIDs%Append(fsIDs%Get(i))
-
-                    ! Second segment
-                    startind = findloc(isstartface, .false., 1, back=.true.)
-
-                    ! Add this segment by adjusting existing contour
-                    allc(i)%isclosed = .false.
-                    allc(i)%startsaddle = 0 ! doesn't start anymore in saddle point
-                    if (tscr(startind+1) == real(nstc, kind=R8)) then 
-                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(startind)], 'start', [-0*distfrac], .false., .true.)
-                    else
-                        ! Also need to delete last part - and remove end vertex
-                        allc(i)%endsaddle = 0 ! doesn't end anymore in saddle point
-                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(startind:startind+1)], 'both', [-0*distfrac, 0*distfrac], .false., .false.)
-                    end if
-                    !allc(i)%x = allc(i)%x([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
-                    !allc(i)%y = allc(i)%y([(k, k = tsc(endind), tsc(endind+1)), nstc+1])
-                    
                 end if 
 
+                ! Checks
+                if ((tscr(1) /= 0.0_R8) .or. (tscr(size(tscr)) /= size(allc(i)%x)-1)) then 
+                    ! Unexpected
+                    call gdErrorHandler('SplitTMTubesTA: '  // &
+                        'contour does not seem to start and end in a tube face, ' // &
+                        'unexpected since tracing should start from face')
+                end if 
+
+                ! Construct the cell polygon
+                tubecell = topomesh%tube%GetCell(tubeID(i))
+                call ConstructTopologicalMeshCellPolygon(topomesh, &
+                    tubecell(1), xcrda, ycrda)
+                call cellpol%Construct(xcrda%Get(), ycrda%Get())
+
+                ! Loop over all segments
+                cc = 0
+                wasfound = .false. 
+                do j = 1, size(tscr)-1
+                    ! Check if this segment should be considered
+                    if (((tfaceind(j) == tubef(1)) .and. (tfaceind(j+1) == tubef(2))) .or. &
+                        ((tfaceind(j) == tubef(2)) .and. (tfaceind(j+1) == tubef(1)))) then 
+                            
+                        ! Update the counter
+                        cc = cc + 1
+
+                        ! Extract the segment coordinates without end points
+                        tempind = [(k, k = 1, size(allc(i)%x))]
+                        tempind = pack(tempind, (tempind > tscr(j)+1.0_R8) .and. &
+                            (tempind < tscr(j+1)+1.0_R8))
+                        tempx = [allc(i)%x(tempind)]
+                        tempy = [allc(i)%y(tempind)]
+
+                        ! Check sizes
+                        if (size(tempx) == 0) then 
+                            ! Need to refine a bit
+                            print *, 'SplitTMTubesTA: closed contour segment ' // & 
+                                'does not have any vertices in between, attempting ' // & 
+                                'to refine (results may be inaccurate...)'
+                            tempx = real([(k, k = 0, 3)], kind=R8)/3.0_R8*(xint(j+1) - xint(j)) + xint(j)
+                            tempy = real([(k, k = 0, 3)], kind=R8)/3.0_R8*(yint(j+1) - yint(j)) + yint(j)
+                            tempx = tempx(2:size(tempx)-1)
+                            tempy = tempy(2:size(tempy)-1)
+                        end if 
+
+                        ! Check if there are any vertices in the cell polygon
+                        call Inpolygon(cellpol, tempx, tempy, isincellpol)
+                        if (any(isincellpol)) then 
+                            ! Check if already found a segment
+                            if (wasfound) then 
+                                call gdErrorHandler('SplitTMTubesTA: ' // & 
+                                    'both segments appear to be located ' // &
+                                    'inside of tube, unexpected')
+                            end if 
+                            wasfound = .true.
+                            newx = [xint(j), tempx, xint(j+1)] 
+                            newy = [yint(j), tempy, yint(j+1)]
+                        end if 
+                    end if
+                end do 
+
+                ! Sanity check: should've found two segments
+                if (cc /= 2) then 
+                    call gdErrorHandler('SplitTMTubesTA: closed contour ' // & 
+                        'did not have two segments as expected, this may be a bug')
+                end if 
+
+                ! Sanity check: should've found a segment that lies within
+                ! the polygon cell
+                if (.not. wasfound) then 
+                    call gdErrorHandler('SplitTMTubesTA: could not find ' // & 
+                        'a closed contour segment that lies within the tube')
+                end if 
+
+
+                ! Keep only part inbetween intersections
+                allc(i)%x = newx
+                allc(i)%y = newy
+                
+                    
             else ! open contour
                 ! Check which intersection is the last intersection with
                 ! the starting face (should be first one)
@@ -10253,6 +10525,8 @@ module ggmod_topology2D
                     !    'contour intersects in tangency point ' // & 
                     !    'and neighbouring face but not in other boundary ' // &
                     !    'faces - unexpected')
+                    call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind)], 'start', [distfrac], .false., .false.)
                 else
 
                     ! Keep only this part of the contour coordinates 
@@ -10260,7 +10534,7 @@ module ggmod_topology2D
                     allc(i)%startsaddle = 0
                     if (tscr(intersectind) == 0.0_R8) then 
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
+                            [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .false., .false.)
                     else
                         call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
                             [tscr(intersectind:intersectind+1)], 'both', [-distfrac, -distfrac], .false., .false.)
@@ -10286,6 +10560,14 @@ module ggmod_topology2D
         ! Insert
         call CleanContours(allc)
         newfsIDs = fsIDs%Get()
+        if (options%writedebugoutput) then 
+            allocate(allpc(size(allc)))
+            do i = 1, size(allc)
+                call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+            end do 
+            call tempps%Construct(allpc)
+            call tempps%WriteData('avpcontours_all_beforeinsertion')
+        end if 
         do i = 1, size(allc)
             call InsertTopologicalMeshContour(topomesh, magneticField, &
                 allc(i), curvetypes%Get(i), newfsIDs(i))
