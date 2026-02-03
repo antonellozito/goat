@@ -5952,22 +5952,23 @@ module ggmod_gridgeneration2D
             end if 
 
             ! Recompute face normals, now with (coarser) vertex values
+            nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
+            nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
             if (facedata(tf)%line%dlcv(1) < facedata(tf)%line%dlcv(facedata(tf)%line%nv)) then 
-                nxf = -(facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
-                nyf = (facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
+                ! Vertices are ordered along line, all good
             else
-                nxf = (facedata(tf)%line%yv(2:) - facedata(tf)%line%yv(1:size(facedata(tf)%line%yv)-1))
-                nyf = -(facedata(tf)%line%xv(2:) - facedata(tf)%line%xv(1:size(facedata(tf)%line%xv)-1))
+                ! Vertices are ordered in opposite direction, need to change changesign
+                changesign = .not. changesign
             end if 
             nnf = sqrt(nxf**2 + nyf**2)
             nxf = nxf/nnf
             nyf = nyf/nnf
             !nxf = nxf2 
             !nyf = nyf2
-            if (doflip) then 
-                nxf = nxf(size(nxf):1:-1)
-                nyf = nyf(size(nyf):1:-1)
-            end if 
+            !if (doflip) then 
+            !    nxf = nxf(size(nxf):1:-1)
+            !    nyf = nyf(size(nyf):1:-1)
+            !end if 
             if (changesign) then 
                 nxf = -nxf
                 nyf = -nyf
