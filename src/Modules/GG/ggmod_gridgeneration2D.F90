@@ -17714,7 +17714,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                                 :: tedgeID, &
-            temploc, tempfID, pointstart, pointend
+            temploc, tempfID, pointstart, pointend, flag
         integer(I8), allocatable, dimension(:)      :: edgeID, vertID, &
             splitvertID, uedgeID, sortind, allvert, &
             voidedgevID1, voidedgevID2, vesseledgeID1, vesseledgeID2, &
@@ -18128,6 +18128,13 @@ module ggmod_gridgeneration2D
         voidedgevID(:, 1) = voidedgevID1
         voidedgevID(:, 2) = voidedgevID2 
         call voidps%Construct(voidedgevID, [vert%x, plfv%xp], [vert%y, plfv%yp])
+
+        ! Orient
+        call voidps%OrientNestedClosedPolygons(flag)
+        if (flag /= 0) then 
+            print *, 'warning: void region polygons could not be oriented, ' // & 
+                'output may be unexpected!'
+        end if 
 
         ! Housekeeping
         !=============
