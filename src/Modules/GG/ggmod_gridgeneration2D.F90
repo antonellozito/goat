@@ -16526,7 +16526,7 @@ module ggmod_gridgeneration2D
             allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
             reslabels, facelabelsGG, facelabelsGD, allstructurelabels, &
             uallstructurelabels, vesselfID, flabels, templabels, &
-            tempf
+            tempf, fclbllist, strIDlist
         integer(I8), allocatable                    :: edges(:, :), &
             vesstructlabels(:, :), linelabels(:, :), vertlabels(:, :)
         logical, allocatable, dimension(:)          :: &
@@ -16785,7 +16785,9 @@ module ggmod_gridgeneration2D
 
         ! Overwrite vessel region labels
         !-------------------------------
+        ! Overwrite
         allocate(flabels(simgrid%face%ntot))
+        allocate(fclbllist(0), strIDlist(0))
         flabels = 0
         if (options%structurebasedlabels) then 
             ! Unpack for ease
@@ -16929,6 +16931,57 @@ module ggmod_gridgeneration2D
 
             ! Remap GG to GD labels
             do i = 1, size(uallstructurelabels)
+                ! Extract the faces
+                ne = count(simgrid%face%label == uallstructurelabels(i))
+                allocate(tfID(ne), edges(ne, 2), sortindex(ne), &
+                ispolygonstart(ne), isbranchingpolygon(ne)) ! 
+                tfID = pack(allfID, simgrid%face%label == uallstructurelabels(i))
+                edges = simgrid%face%vert(tfID, :)
+                call SortPolygonEdges(edges, ne, sortindex, ispolygonstart, &
+                    isbranchingpolygon)
+                allocate(psind(count(ispolygonstart)))
+
+                ! Add label
+                fclbllist = [fclbllist, uallstructurelabels(i)]
+                strIDlist = [strIDlist, uallstructurelabels(i)]
+
+                ! Check number of polygons
+                if (count(ispolygonstart) > 1) then 
+                    ! Issue message
+                    print *, 'TranslateGridLabelsSOLPS: multiple disjoint ' // & 
+                        'polygon pieces detected for structure: ID', uallstructurelabels(i), &
+                        'splitting up structure...' 
+
+                    ! Set labels for each distinct polygon piece (except first one)
+                    psind = pack([(k, k = 1, ne)], ispolygonstart)
+                    psind = [psind, ne+1]
+                    do j = 2, count(ispolygonstart)
+
+                        ! Update the face label
+                        flc = flc + flcinc 
+
+                        ! Avoid adding any reserved labels
+                        do while (any(abs(flc) == abs(reslabels)))
+                            flc = flc + flcinc
+                        end do 
+
+                        ! Get indices
+                        ind = [(k, k = psind(j), psind(j+1)-1)]
+
+                        ! Set label
+                        simgrid%face%label(tfID(sortindex(ind))) = &
+                            sign(abs(flc), uallstructurelabels(i)) 
+
+                        ! Add label
+                        fclbllist = [fclbllist, sign(abs(flc), uallstructurelabels(i))]
+                        strIDlist = [strIDlist, uallstructurelabels(i)]
+
+                    end do                     
+                end if 
+                deallocate(tfID, edges, sortindex, ispolygonstart, isbranchingpolygon, psind)
+
+
+                ! Check if multiple polygons are formed, if not
                 where (facelabelsGG == uallstructurelabels(i)) facelabelsGD = vesselID
                 if (.not. any(uallstructurelabels(i) == facelabelsGG)) then 
                     facelabelsGG = [facelabelsGG, uallstructurelabels(i)]
@@ -16939,6 +16992,10 @@ module ggmod_gridgeneration2D
             ! Housekeeping
             end associate
         end if 
+
+        ! Write mapping
+        call WriteFaceLabelToStructureIDMapping(fclbllist, strIDlist, &
+            'goat_fclbltostrID')
 
         ! Clean mapping
         allocate(keepind(size(facelabelsGG)))
@@ -18136,6 +18193,11 @@ module ggmod_gridgeneration2D
                 'output may be unexpected!'
         end if 
 
+        ! Flip
+        do i = 1, voidps%np 
+            call voidps%polygons(i)%flip()
+        end do 
+
         ! Housekeeping
         !=============
         end associate
@@ -18373,9 +18435,8 @@ module ggmod_gridgeneration2D
         character(*), intent(in)                :: filename 
 
         ! Auxiliary
-        character(:), allocatable               :: fmt, thisline
-        integer(I8)                             :: isvesselvertex, fu, &
-            gridvertexID, nv 
+        character(:), allocatable               :: thisline
+        integer(I8)                             :: fu, nv 
         integer                                 :: readstatus
         integer(I8), allocatable, dimension(:)  :: tempvID, tempisvesselvertex
         integer(I8), allocatable, dimension(:, :)   :: templabels 
@@ -18385,7 +18446,7 @@ module ggmod_gridgeneration2D
         type(PolygonUDT), allocatable           :: pol(:)
 
         ! Loop
-        integer(I8)                             :: i, j
+        integer(I8)                             :: i
 
         ! Initialize
         !===========
@@ -18482,6 +18543,46 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Mapping between face labels and structure IDs
+    subroutine WriteFaceLabelToStructureIDMapping(fclbllist, strIDlist, &
+        filename)
+
+        ! Description
+        !============
+        ! Write out the mapping between the face labels and structure 
+        ! IDs, i.e. which face label(s) belong to which structure. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), dimension(:), intent(in)       :: fclbllist, strIDlist
+        character(*), intent(in)                    :: filename 
+
+        ! Auxiliary
+        integer                                     :: fu 
+
+        ! Loop
+        integer(I8)                                 :: i 
+
+        ! Write
+        !======
+        ! Open file 
+        open (action='write', file=trim(filename) // '.dat', newunit=fu, &
+            status='unknown')
+
+        ! Header
+        write (fu, *) 'nfcLbl'
+        write (fu, *) size(fclbllist)
+        write (fu, *) 'fcLbl    strID'
+
+        ! Labels
+        do i = 1, size(fclbllist)
+            write (fu, *) fclbllist(i), strIDlist(i)
+        end do 
+
+        close(fu)
+
+    end subroutine
 
     !------------------------------------------------------------------!
     !                          DIAGNOSTICS                             !
