@@ -938,7 +938,7 @@ module ggmod_topology2D
         ! Compute intersections
         !$omp parallel do default(none) schedule(dynamic) collapse(2) &
         !$omp shared(fxp, fyp, magneticField, fxpeid, fxpsid, fxpsrid, &
-        !$omp fypeid, fypsid, fypsrid, xc, yc, fc, tc, ec, nfxc, nfyc) & 
+        !$omp fypeid, fypsid, fypsrid, xc, yc, fc, tc, ec, nfxc, nfyc, donewton) & 
         !$omp private(i, j, tx, ty, ts1, ts2, tsr1, tsr2, nx, tt, k, &
         !$omp tempx, tempy, conv, tf, tfxx, tfxy, tfyy, thiseig)
         do i = 1, nfxc
@@ -953,20 +953,22 @@ module ggmod_topology2D
             
                 ! Add intersections
                 allocate(tt(nx))
-                do k = 1, nx 
-                    ! Refine
-                    call TinyNewtonSolver(tempx, tempy, conv, &
-                        tx(k), ty(k), magneticField)
-                     
-                    ! Check 
-                    if (conv) then 
-                        tx(k) = tempx
-                        ty(k) = tempy
-                    else
-                        print *, 'TraceExtrema2DBox: newton solver did ' // & 
-                            'not converge, taking original estimate'
-                    end if
-                end do 
+                if (donewton) then 
+                    do k = 1, nx 
+                        ! Refine
+                        call TinyNewtonSolver(tempx, tempy, conv, &
+                            tx(k), ty(k), magneticField)
+                        
+                        ! Check 
+                        if (conv) then 
+                            tx(k) = tempx
+                            ty(k) = tempy
+                        else
+                            print *, 'TraceExtrema2DBox: newton solver did ' // & 
+                                'not converge, taking original estimate'
+                        end if
+                    end do 
+                end if 
 
                 ! Compute value at location and second order derivatives
                 allocate(tf(nx), tfxx(nx), tfxy(nx), tfyy(nx))
@@ -1525,7 +1527,8 @@ module ggmod_topology2D
             val = [val, val(2)] ! extend to take next edge into account
 
             ! Compute precision
-            fdifftol = (maxval(val) - minval(val))*tprelfieldtol
+            fdifftol = (maxval(val) - minval(val))*tprelfieldtol ! why is that still in here?
+            fdifftol = 0.0_R8 
 
             ! Take difference
             dval = val(2:size(val)) - val(1:size(val)-1)
@@ -1550,20 +1553,20 @@ module ggmod_topology2D
             
             k = 1
             hasbeendeleted = .false.
-            do while (k < size(tf))
-                ! Check difference
-                if ((tv(k+1)-tv(k) == 1)) then ! (abs(tf(k+1)-tf(k)) < fdifftol) .or. 
-                    ! Remove values, such that subsequent ones can be
-                    ! checked too
-                    hasbeendeleted = .true.
-                    extrloc(tv(k:k+1)) = .false.
-                    tv = [tv(:k-1), tv(k+1:)]
-                    tf = [tf(:k-1), tf(k+1:)]
-                    k = 1
-                else
-                    k = k + 1
-                end if
-            end do 
+            !do while (k < size(tf))
+            !    ! Check difference
+            !    if ((tv(k+1)-tv(k) == 1)) then ! (abs(tf(k+1)-tf(k)) < fdifftol) .or. 
+            !        ! Remove values, such that subsequent ones can be
+            !        ! checked too
+            !        hasbeendeleted = .true.
+            !        extrloc(tv(k+1)) = .false.
+            !        tv = [tv(:k-1), tv(k+1:)]
+            !        tf = [tf(:k-1), tf(k+1:)]
+            !        k = 1
+            !    else
+            !        k = k + 1
+            !    end if
+            !end do 
             
             ! Check last 'edge' - shouldn't do this, since boundary
             ! polygons are closed and therefore first and last 
@@ -1783,7 +1786,7 @@ module ggmod_topology2D
             intcstart, dointersect
         logical, allocatable, dimension(:)      :: tracepoints, &
             ispseudosaddlepoint, isnbface, rmind, isstartingcontour, &
-            isendingcontour
+            isendingcontour, forcevert
 
         type(ContourUDT), allocatable           :: tc(:), allc(:), alltpc(:)
         type(PolygonUDT), allocatable           :: allpc(:)
@@ -1995,8 +1998,11 @@ module ggmod_topology2D
                                     call topomesh%face%y(j)%Set(ty)
 
                                     ! Reconvert to polygon
+                                    allocate(forcevert(size(tx)))
+                                    forcevert([1, size(tx)]) = .true. ! force final vertices to remain the same
                                     call topomesh%face%pol(j)%Construct(&
-                                        topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get())
+                                        topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), forcevert_opt=forcevert)
+                                    deallocate(forcevert)
 
                                     ! Contour
                                     !--------
@@ -3786,6 +3792,11 @@ module ggmod_topology2D
         ! therefore be called after adding all boundaries to the 
         ! topological mesh, but before adding cells and other data. 
 
+        ! Note: we also allow deletion of tangency/boundary points IF
+        ! they have only two neighbouring aligned vessel faces as boundaries. 
+        ! If those boundaries would have different flux surface ID, 
+        ! they are still merged. 
+
         ! Note: we now return a logical vector that is true for removed
         ! faces according to the old number of faces in the original 
         ! topomesh. New faces can then also be found, since they have
@@ -3833,18 +3844,12 @@ module ggmod_topology2D
             markv = .false. 
             markf = .false.
             do i = 1, topomesh%vert%ntot
-                ! Is it a type 2 tangency point, regular vertex, or 
+                ! Is it a tangency point, regular vertex, or 
                 ! boundary vertex? 
                 if (.not. any(topomesh%vert%type(i) == [TMvertexbndID, &
-                    0, TMvertextp2ID])) then 
+                    0, TMvertextp2ID, TMvertextp1ID])) then 
                     cycle
                 end if 
-
-                ! Is it a regular or boundary vertex?
-                !if ((.not. topomesh%vert%type(i) == TMvertexbndID) .and. &
-                !    (.not. topomesh%vert%type(i) == 0)) then 
-                !    cycle 
-                !end if 
 
                 ! Does it only appear twice in face%vert?
                 appearstwice = ((topomesh%face%vert(:, 1) == i) .or. (topomesh%face%vert(:, 2) == i))
@@ -3858,14 +3863,25 @@ module ggmod_topology2D
                     cycle ! do in a next iteration
                 end if 
 
-                ! Do both boundaries have the same type and flux surface
-                ! ID? 
+                ! Do both boundaries have the same type? 
                 if (.not. (topomesh%face%type(tf(1)) == topomesh%face%type(tf(2)))) then 
                     cycle
                 end if 
-                if (.not. (topomesh%face%fsID(tf(1)) == topomesh%face%fsID(tf(2)))) then 
-                    cycle
+
+                ! Is the vertex a type 1 tangency point? Then we need to 
+                ! check if both faces are aligned boundary faces (flux 
+                ! surface ID doesn't matter)
+                if (topomesh%vert%type(i) == TMvertextp1ID) then 
+                    if (.not. ( (topomesh%face%type(tf(1)) == TMfacealbndID) &
+                        .and. (topomesh%face%type(tf(2)) == TMfacealbndID))) then 
+                        cycle 
+                    end if 
                 end if 
+
+                ! Check if same flux surface ID - not necessary anymore? 
+                !if (.not. (topomesh%face%fsID(tf(1)) == topomesh%face%fsID(tf(2)))) then 
+                !    cycle
+                !end if 
 
                 ! If we got here, we passed all checks. Mark for merging
                 ! and deletion
