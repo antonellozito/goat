@@ -1663,7 +1663,7 @@ module mod_polygon
     !------------------------------------------------------------------!
 
     ! Constructor
-    subroutine ConstructPolygon(polygon, x, y, labels) 
+    subroutine ConstructPolygon(polygon, x, y, labels, forcevert_opt) 
 
         ! Description
         !============
@@ -1671,12 +1671,19 @@ module mod_polygon
         ! It is assumed that there are no NaNs present anymore in the 
         ! coordinates and that the sizes of x and y are the same. 
 
+        ! Note: to prevent the duplicate point remover to remove certain
+        ! key points, one can specify those not to be removed in 
+        ! forcevert_opt (this should be a logical). By default, any point
+        ! can be removed. This logical vector should have the same number
+        ! of elements as the initial x, y coordinates
+
         ! Declare variables
         !==================
         ! Arguments
         class(PolygonUDT)                       :: polygon 
         real(R8), intent(in)                    :: x(:), y(:)
         integer(I8), intent(in)                 :: labels(:, :) 
+        logical, intent(in), optional           :: forcevert_opt(:)
 
         ! Auxiliary
 
@@ -1688,7 +1695,7 @@ module mod_polygon
         call polygon%Initialize(x, y, labels)
 
         ! Check for duplicate points, remove
-        call polygon%RemoveDuplicatePoints()
+        call polygon%RemoveDuplicatePoints(forcevert_opt)
 
         ! Extract the vertices
         call polygon%SetVert()
@@ -1709,7 +1716,7 @@ module mod_polygon
     end subroutine
 
     ! Constructor, without labels
-    subroutine ConstructPolygonNolabels(polygon, x, y)
+    subroutine ConstructPolygonNolabels(polygon, x, y, forcevert_opt)
 
         ! Description
         !============
@@ -1721,6 +1728,7 @@ module mod_polygon
         ! Arguments
         class(PolygonUDT)           :: polygon 
         real(R8), intent(in)        :: x(:), y(:)
+        logical, intent(in), optional           :: forcevert_opt(:)
 
         ! Auxiliary
         integer(I8), allocatable    :: labels(:, :)
@@ -1729,7 +1737,7 @@ module mod_polygon
         !==========
         allocate(labels(size(x, 1), 1))
         labels = 0
-        call polygon%Construct(x, y, labels)
+        call polygon%Construct(x, y, labels, forcevert_opt)
 
     end subroutine
 
@@ -2104,7 +2112,7 @@ module mod_polygon
     end subroutine
 
     ! Duplicate point remover
-    subroutine RemoveDuplicatePoints(polygon)
+    subroutine RemoveDuplicatePoints(polygon, forcevert_opt)
 
         ! Description
         !============
@@ -2118,6 +2126,10 @@ module mod_polygon
         ! Input
         !------
         ! - polygon:        polygon structure with the x, y, vert, labels fields
+        ! - forcevert_opt:  (optional) force vertices to be in polygon 
+        !                   (i.e. don't allow them to be deleted). This 
+        !                   may result in unexpected outcomes, warnings 
+        !                   will be printed in that case
 
         ! Output
         !-------
@@ -2144,6 +2156,7 @@ module mod_polygon
         !==================
         ! Arguments
         class(PolygonUDT)           :: polygon 
+        logical, intent(in), optional   :: forcevert_opt(:)
 
         ! Auxiliary
         real(R8)                    :: d 
@@ -2153,8 +2166,9 @@ module mod_polygon
         integer(I8)                 :: nlabels
         integer(I8), allocatable    :: mapping(:), tempedge(:, :), &
             diffindex(:), templabels(:, :)
-
-        logical, allocatable        :: keepvertex(:), keepedges(:)
+        logical                     :: vertnotremoved
+        logical, allocatable        :: keepvertex(:), keepedges(:), &
+            forcevert(:)
 
         ! Loop
         integer(I8)                 :: i, j, k
@@ -2175,6 +2189,21 @@ module mod_polygon
         keepvertex(:) = .true.
         diffindex(:) = 0
         nlabels = size(polygon%labels, 2)
+        if (present(forcevert_opt)) then 
+            ! Assign
+            forcevert = forcevert_opt
+
+            ! Checks
+            if (size(forcevert) /= nv) then 
+                call PolygonErrorHandler('RemoveDuplicatePoints: the ' // & 
+                    'forcevert optional input argument should have the ' // & 
+                    'same dimensions as the polygon coordinates, check input')
+            end if
+        else
+            allocate(forcevert(nv))
+            forcevert = .false. 
+        end if 
+        vertnotremoved = .false. 
         
         ! Loop over all points but one 
         do i = 1, nv-1 
@@ -2186,17 +2215,38 @@ module mod_polygon
                 ! Check if distance is smaller than distance tolerance
                 if (d < disttol) then 
                     ! Mark for removal
-                    keepvertex(j) = .false. 
+                    if (.not. forcevert(j)) then 
+                        ! Take vertex j
+                        keepvertex(j) = .false. 
 
-                    ! Update mapping
-                    mapping(j) = mapping(i) ! not just i - i can already be mapped to another vertex
+                        ! Update mapping
+                        mapping(j) = mapping(i) ! not just i - i can already be mapped to another vertex
+                    else
+                        ! Check if we can remove vertex i
+                        if (.not. forcevert(i)) then 
+                            ! Take vertex i 
+                            keepvertex(i) = .false.
 
+                            ! Update mapping
+                            mapping(i) = mapping(j)
+                        else
+                            ! No vertex can be removed, but issue warning
+                            vertnotremoved = .true. 
+                        end if 
+                    end if 
                 end if
             end do
         end do
 
         ! Stop associate
         end associate
+
+        ! Issue warning if necessary
+        if (vertnotremoved) then 
+            call PolygonWarningHandler('RemoveDuplicatePoints: vertices ' &
+                // 'were duplicate but not removed by forcing. Results may be ' & 
+                // 'surprising')
+        end if 
 
         ! Remove & rebuild
         !=================
