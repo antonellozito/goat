@@ -16171,6 +16171,7 @@ module ggmod_topology2D
             ! Increasing psi
             do i = 2, size(psi)
                 if (psi(i) < psi(i-1)) then 
+                    psi(i) = psi(i-1) ! also keep psi the same!
                     dlcrad(i) = dlcrad(i-1)
                 else
                     dlcrad(i) = dlcrad(i-1) + abs(bx(i-1)*dx(i-1) + by(i-1)*dy(i-1))
@@ -16180,6 +16181,7 @@ module ggmod_topology2D
             ! Decreasing psi
             do i = 2, size(psi)
                 if (psi(i) > psi(i-1)) then 
+                    psi(i) = psi(i-1)
                     dlcrad(i) = dlcrad(i-1)
                 else
                     dlcrad(i) = dlcrad(i-1) + abs(bx(i-1)*dx(i-1) + by(i-1)*dy(i-1))
