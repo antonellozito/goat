@@ -1241,11 +1241,11 @@ module ggmod_topology2D
                     if (tfval(1) > tfval(size(tfval))) then 
                         ! Decreasing, set edge lengths to zero where they
                         ! are aligned
-                        where (dtfval <= 0.0_R8) dl = 0.0_R8
+                        where (dtfval >= 0.0_R8) dl = 0.0_R8
                     else
                         ! Increasing, set edge lengths to zero where they
                         ! are aligned
-                        where (dtfval >= 0.0_R8) dl = 0.0_R8
+                        where (dtfval <= 0.0_R8) dl = 0.0_R8
                     end if 
                     frac(j) = sum(dl)/ltot
                     frac(j) = abs((maxval(tfval) - minval(tfval))/abs(tfval(1) - tfval(size(tfval))))
@@ -2064,7 +2064,7 @@ module ggmod_topology2D
 
                                     elseif (intcstart) then 
                                         ! Contour is oriented from start to end
-                                        notdelind = [1, (cc, cc = vindI(2)+1, size(tc(k)%x))]
+                                        notdelind = [1, (cc, cc = maxval(vindI)+1, size(tc(k)%x))]
                                     else
                                         notdelind = [(cc, cc = 1, vindI(1)), size(tc(k)%x)]
                                     end if  
