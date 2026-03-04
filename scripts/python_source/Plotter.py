@@ -276,6 +276,7 @@ def PlotGridCellArea(grid, fignum, doinverse=False):
     # Plot minimal location
     loc = np.argmin(abs(surfA))
     PlotPoints2D(grid.cell.x[loc], grid.cell.y[loc], fignum, color='r', marker='o')
+    print ("PlotGridCellArea: smallest cell located at ", grid.cell.x[loc], grid.cell.y[loc], " with surface area: ", np.min(abs(surfA)))
 
 #--------------------------------------------------------------------------#
 #                              Grid Optimization                           #
