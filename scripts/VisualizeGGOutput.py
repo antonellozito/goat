@@ -101,7 +101,6 @@ except:
 try:
     # Load fort.78
     vals = dh.ReadFort78File('fort.78')
-    print(vals)
 
     # Visualize
     plotter.PlotPolygons2D(vals[:, 0], vals[:, 1], 2, linewidth=2, color='r', label='void polygons')
