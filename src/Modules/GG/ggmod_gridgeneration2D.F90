@@ -18131,7 +18131,7 @@ module ggmod_gridgeneration2D
             tempdlcv
         type(PolygonSetUDT)                         :: tempvoidps
         type(PolygonLevelsetFunction2DClosedExactUDT)   :: tempvoidplf
-        type(GGTMFieldlineDataUDT)                  :: templine
+        type(GGTMFieldlineDataUDT)                  :: templine, origline
 
         ! Loop
         integer(I8)                         :: i, j, k 
@@ -18522,12 +18522,13 @@ module ggmod_gridgeneration2D
                     call facedata(bndfaces(k))%line%UpdateLineData(ggtmdata)
 
                     ! Copy 
-                    templine = facedata(bndfaces(k))%line 
+                    templine = facedata(bndfaces(k))%line ! to be adjusted
+                    origline = facedata(bndfaces(k))%line ! to be kept the same
 
                     ! Get all face indices
-                    allocate(tempf(srfline%nv-1))
-                    do j = 1, srfline%nv-1
-                        call MapVertexPairToFace(srfline%vert(j), srfline%vert(j+1), &
+                    allocate(tempf(origline%nv-1))
+                    do j = 1, origline%nv-1
+                        call MapVertexPairToFace(origline%vert(j), origline%vert(j+1), &
                             simgrid%face%vert, simgrid%face%ntot, tempfID)
                         tempf(j) = tempfID 
                     end do 
@@ -18549,29 +18550,29 @@ module ggmod_gridgeneration2D
 
                         ! Split and refine at first vertex if not on templine
                         ! already 
-                        if (.not. any(tempdlcv == srfline%dlcv(j))) then 
-                            temploc = findloc(tempdlcv < srfline%dlcv(j), &
+                        if (.not. any(tempdlcv == origline%dlcv(j))) then 
+                            temploc = findloc(tempdlcv < origline%dlcv(j), &
                                 .true., 1, back=.true.)
                             if (temploc == 0) then 
                                 temploc = 1
                             end if 
                             tempdlcv = [tempdlcv(1:temploc), &
-                                0.5*(tempdlcv(temploc) + srfline%dlcv(j)), &
-                                0.5*(tempdlcv(temploc+1) + srfline%dlcv(j+1)), &
+                                0.5*(tempdlcv(temploc) + origline%dlcv(j)), &
+                                0.5*(tempdlcv(temploc+1) + origline%dlcv(j+1)), &
                                 tempdlcv(temploc+1:)]
                         end if 
 
                         ! Split and refine at second vertex if not on templine
                         ! already 
-                        if (.not. any(tempdlcv == srfline%dlcv(j+1))) then 
-                            temploc = findloc(tempdlcv < srfline%dlcv(j+1), &
+                        if (.not. any(tempdlcv == origline%dlcv(j+1))) then 
+                            temploc = findloc(tempdlcv < origline%dlcv(j+1), &
                                 .true., 1, back=.true.)
                             if (temploc == 0) then 
                                 temploc = 1
                             end if 
                             tempdlcv = [tempdlcv(1:temploc), &
-                                0.5*(tempdlcv(temploc) + srfline%dlcv(j+1)), &
-                                0.5*(tempdlcv(temploc+1) + srfline%dlcv(j+1)), &
+                                0.5*(tempdlcv(temploc) + origline%dlcv(j+1)), &
+                                0.5*(tempdlcv(temploc+1) + origline%dlcv(j+1)), &
                                 tempdlcv(temploc+1:)]
                         end if 
 
@@ -18589,9 +18590,9 @@ module ggmod_gridgeneration2D
                         end if 
 
                         ! Loop over all labels of points in between 
-                        pointstart = findloc(srfline%dlcv(j) < templine%dlcv, &
+                        pointstart = findloc(origline%dlcv(j) < templine%dlcv, &
                             .false., 1, back=.true.)+1
-                        pointend = findloc(srfline%dlcv(j+1) >= templine%dlcv, &
+                        pointend = findloc(origline%dlcv(j+1) >= templine%dlcv, &
                             .false., 1, back=.false.)-1
 
                         ! Mark for removal
@@ -18600,13 +18601,13 @@ module ggmod_gridgeneration2D
                     end do 
 
                     ! Remove end points if they are split vertices
-                    if (srfline%vert(1) <= topomesh%vert%ntot) then 
-                        if (issplitvert(srfline%vert(1))) then 
+                    if (origline%vert(1) <= topomesh%vert%ntot) then 
+                        if (issplitvert(origline%vert(1))) then 
                             includepoints(1) = .false. 
                         end if 
                     end if 
-                    if (srfline%vert(srfline%nv) <= topomesh%vert%ntot) then 
-                        if (issplitvert(srfline%vert(srfline%nv))) then 
+                    if (origline%vert(origline%nv) <= topomesh%vert%ntot) then 
+                        if (issplitvert(origline%vert(origline%nv))) then 
                             includepoints(size(includepoints)) = .false. 
                         end if 
                     end if 
