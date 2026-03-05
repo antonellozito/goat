@@ -417,6 +417,9 @@ module ggmod_gridgeneration2D
         ! Initializer
         procedure :: Initialize         => InitializeGGTMData
 
+        ! Segment replacing
+        procedure :: ReplaceSegment     => ReplaceGGTMSegment
+
         ! Clean up
         procedure :: Clean              => CleanGGTMData
 
@@ -4877,7 +4880,7 @@ module ggmod_gridgeneration2D
                 [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i, vert%type(i))
 
             ! Initialize line
-            call vertdata(i)%line%Initialize(ggtmdata, [nseg])
+            call vertdata(i)%line%Initialize(ggtmdata, [nseg], i, i)
         end do 
 
         ! Construct face segments
@@ -4891,7 +4894,8 @@ module ggmod_gridgeneration2D
                 face%type(i))
 
             ! Initialize line
-            call facedata(i)%line%Initialize(ggtmdata, [nseg])
+            call facedata(i)%line%Initialize(ggtmdata, [nseg], face%vert(i, 1), &
+                face%vert(i, 2))
         end do 
 
         ! Housekeeping
@@ -6615,7 +6619,8 @@ module ggmod_gridgeneration2D
                         0_I8, vertexID(j, k), vertexID(j, k+1), 0_I8)
 
                     ! Add 
-                    call celldata(tubec(k))%lines(j)%Initialize(ggtmdata, [nseg])
+                    call celldata(tubec(k))%lines(j)%Initialize(ggtmdata, [nseg], &
+                        vertexID(j, k), vertexID(j, k+1))
 
                 end do 
 
@@ -6708,7 +6713,7 @@ module ggmod_gridgeneration2D
 
         ! Auxiliary
         integer(I8)                             :: nt, startsegID, &
-            endsegID, vind1, vind2, tsegID
+            endsegID, vind1, vind2, tsegID, sv, ev
         integer(I8), allocatable, dimension(:)  :: tc, srfvert, erfvert, &
             allsegID, uerfvert, usrfvert, extendseg
         logical, allocatable, dimension(:)      :: dostart, doend
@@ -6803,7 +6808,6 @@ module ggmod_gridgeneration2D
             !---------------------
             if (options%extendtptubes) then 
                 
-
                 ! Check first tube
                 if (ggtmdata%seg(tubes(1)%hfline%segID(1))%isvertex ) then 
 
@@ -6811,6 +6815,8 @@ module ggmod_gridgeneration2D
                     allocate(dostart(1), doend(1), extendseg(0)) 
                     dostart = .false. 
                     doend  = .false. 
+                    sv = ggtmdata%seg(tubes(1)%hfline%segID(1))%sv
+                    ev = ggtmdata%seg(tubes(1)%hfline%segID(1))%ev
 
                     ! Is start line segment too long?
                     vind1 = findloc(srfline%vert, tubes(1)%hfline%vert(1), 1)
@@ -6851,9 +6857,13 @@ module ggmod_gridgeneration2D
                         startsegID = 0
                         allsegID = srfline%segID
                         do k = 1, size(allsegID)
-                            if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1) .or. &
-                                ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1)) then
                                 startsegID = allsegID(k)
+                                sv = ggtmdata%seg(allsegID(k))%ev
+                                exit  
+                            elseif (ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
+                                startsegID = allsegID(k)
+                                sv = ggtmdata%seg(allsegID(k))%sv
                                 exit 
                             end if 
                         end do 
@@ -6880,9 +6890,13 @@ module ggmod_gridgeneration2D
                         endsegID = 0
                         allsegID = erfline%segID
                         do k = 1, size(allsegID)
-                            if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1) .or. &
-                                ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(1)%hfline%vert(1)) then
                                 endsegID = allsegID(k)
+                                ev = ggtmdata%seg(allsegID(k))%ev
+                                exit  
+                            elseif (ggtmdata%seg(allsegID(k))%ev == tubes(1)%hfline%vert(1)) then 
+                                endsegID = allsegID(k)
+                                ev = ggtmdata%seg(allsegID(k))%sv
                                 exit 
                             end if 
                         end do 
@@ -6901,8 +6915,8 @@ module ggmod_gridgeneration2D
                     ! Extend if necessary
                     if (size(extendseg) > 0) then 
 
-                        ! Construct line
-                        call tubes(1)%hfline%Initialize(ggtmdata, extendseg)
+                        ! Construct line 
+                        call tubes(1)%hfline%Initialize(ggtmdata, extendseg, sv, ev)
 
                         ! Check if we need to flip - probably not necessary if only one segment
                         if (ggtmdata%seg(tubes(1)%hfline%segID(1))%TMfaceID == celldata(i)%erf) then 
@@ -6973,6 +6987,8 @@ module ggmod_gridgeneration2D
                     allocate(dostart(1), doend(1), extendseg(0)) 
                     dostart = .false. 
                     doend  = .false. 
+                    sv = ggtmdata%seg(tubes(nt)%lfline%segID(1))%sv
+                    ev = ggtmdata%seg(tubes(nt)%lfline%segID(1))%ev
 
                     ! Is start line segment too long?
                     vind1 = findloc(srfline%vert, tubes(nt)%hfline%vert(1), 1)
@@ -7013,9 +7029,13 @@ module ggmod_gridgeneration2D
                         startsegID = 0
                         allsegID = srfline%segID
                         do k = 1, size(allsegID)
-                            if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1) .or. &
-                                ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1)) then
                                 startsegID = allsegID(k)
+                                sv = ggtmdata%seg(allsegID(k))%ev
+                                exit  
+                            elseif (ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
+                                startsegID = allsegID(k)
+                                sv = ggtmdata%seg(allsegID(k))%sv
                                 exit 
                             end if 
                         end do 
@@ -7042,9 +7062,13 @@ module ggmod_gridgeneration2D
                         endsegID = 0
                         allsegID = erfline%segID
                         do k = 1, size(allsegID)
-                            if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1) .or. &
-                                ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
+                            if (ggtmdata%seg(allsegID(k))%sv == tubes(nt)%lfline%vert(1)) then
                                 endsegID = allsegID(k)
+                                ev = ggtmdata%seg(allsegID(k))%ev
+                                exit  
+                            elseif (ggtmdata%seg(allsegID(k))%ev == tubes(nt)%lfline%vert(1)) then 
+                                endsegID = allsegID(k)
+                                ev = ggtmdata%seg(allsegID(k))%sv
                                 exit 
                             end if 
                         end do 
@@ -7063,8 +7087,8 @@ module ggmod_gridgeneration2D
                     ! Extend if necessary
                     if (size(extendseg) > 0) then 
 
-                        ! Construct line
-                        call tubes(nt)%lfline%Initialize(ggtmdata, extendseg)
+                        ! Construct line (correct orientation done later)
+                        call tubes(nt)%lfline%Initialize(ggtmdata, extendseg, sv, ev)
 
                         ! Check if we need to flip - probably not necessary if only one segment
                         if (ggtmdata%seg(tubes(nt)%lfline%segID(1))%TMfaceID == celldata(i)%erf) then 
@@ -9695,6 +9719,197 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Removal
+    subroutine ReplaceGGTMSegment(ggtmdata, origsegID, newsegID)
+
+        ! Description
+        !============
+        ! Replace a single segment by a set of new segments in the face
+        ! and cell data of the ggtmdata structure. This serves as the
+        ! updating routine when splitting segments. Note that segments are
+        ! not removed in this routine - this should be done with the
+        ! CleanGGTMData routine. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                      :: ggtmdata 
+        integer(I8), intent(in)                 :: origsegID 
+        integer(I8), dimension(:), intent(in)   :: newsegID 
+
+        ! Auxiliary
+        integer(I8)                             :: ns, sv, ev
+        integer(I8), allocatable, dimension(:)  :: sortedsegID, &
+            linesegID, sortindex, tsegID
+        integer(I8), allocatable, dimension(:, :)   :: pein 
+        logical, allocatable, dimension(:)      :: ispolygonstart, &
+            isbranchingpolygon
+
+        ! Loop
+        integer(I8)                             :: i, j, si
+
+        ! Unpack
+        !=======
+        associate(&
+            seg     => ggtmdata%seg,    &
+            vert    => ggtmdata%vert,   &
+            face    => ggtmdata%face,   &
+            cell    => ggtmdata%cell,   &
+            tube    => ggtmdata%tube    &
+            )
+
+        ! Checks
+        !=======
+        ns = size(newsegID)
+        if (ns == 0) then 
+            ! This use is not inteded, throw error
+            call gdErrorHandler('ReplaceGGTMSegment: new segment ID vector is empty, ' // & 
+                'not supported')
+        end if 
+
+        ! Sort segments
+        !==============
+        ! Initialize
+        allocate(pein(ns, 2), sortindex(ns), ispolygonstart(ns), &
+            isbranchingpolygon(ns))
+        pein(:, 1) = [ggtmdata%seg(newsegID)%sv]
+        pein(:, 2) = [ggtmdata%seg(newsegID)%ev]
+
+        ! Sort
+        call SortPolygonEdges(pein, ns, sortindex, ispolygonstart, &
+            isbranchingpolygon)
+
+        ! Sanity checks
+        if (any(isbranchingpolygon)) then 
+            call gdErrorHandler('ReplaceGGTMSegment: new segment IDs do ' // & 
+                'not form a simple polygon, unexpected. Check input')
+        end if 
+        if (count(ispolygonstart) > 1) then 
+            call gdErrorHandler('ReplaceGGTMSegment: new segment IDs form ' // & 
+                'multiple polygons, unexpected. Check input')
+        end if 
+        
+        ! Sort the edges
+        sortedsegID = newsegID(sortindex)
+
+        ! Check if we need to flip
+        if (any([ggtmdata%seg(sortedsegID(1))%sv, ggtmdata%seg(sortedsegID(1))%ev] == &
+            ggtmdata%seg(origsegID)%sv)) then
+            ! First vertex found at start, no need to flip
+        elseif (any([ggtmdata%seg(sortedsegID(1))%sv, ggtmdata%seg(sortedsegID(1))%ev] == &
+            ggtmdata%seg(origsegID)%ev)) then
+            ! First vertex found at end, need to flip
+            sortedsegID = sortedsegID(ns:1:-1)
+        else
+            ! First vertex not found, unexpected. Throw error
+            call gdErrorHandler('ReplaceGGTMSegment: first vertex not present ' // & 
+                'in first segment, unexpected. Check input')  
+        end if  
+
+        ! Replace segment IDs
+        !====================
+        ! Vertices
+        do i = 1, size(ggtmdata%vert)
+            tsegID = ggtmdata%vert(i)%line%segID
+            do si = 1, size(tsegID)
+                if (tsegID(si) == origsegID) then 
+                    ! Check if the original segment was flipped, if so: flip also
+                    if (ggtmdata%vert(i)%line%flipseg(si)) then 
+                        linesegID = [tsegID(:si-1), sortedsegID(ns:1:-1), &
+                            tsegID(si+1:)]
+                    else
+                        linesegID = [tsegID(:si-1), sortedsegID, tsegID(si+1:)]
+                    end if 
+                    sv = ggtmdata%vert(i)%line%vert(1)
+                    ev = ggtmdata%vert(i)%line%vert(ggtmdata%vert(i)%line%nv)
+                    call ggtmdata%vert(i)%line%Initialize(ggtmdata, linesegID, sv, ev)
+                end if 
+            end do 
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            tsegID = face(i)%line%segID
+            do si = 1, size(tsegID)
+                if (tsegID(si) == origsegID) then 
+                    ! Check if the original segment was flipped, if so: flip also
+                    if (face(i)%line%flipseg(si)) then 
+                        linesegID = [tsegID(:si-1), sortedsegID(ns:1:-1), &
+                            tsegID(si+1:)]
+                    else
+                        linesegID = [tsegID(:si-1), sortedsegID, tsegID(si+1:)]
+                    end if 
+                    sv = ggtmdata%face(i)%line%vert(1)
+                    ev = ggtmdata%face(i)%line%vert(ggtmdata%face(i)%line%nv)
+                    call face(i)%line%Initialize(ggtmdata, linesegID, sv, ev)
+                end if 
+            end do 
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                tsegID = cell(i)%lines(j)%segID
+                do si = 1, size(tsegID)
+                    if (tsegID(si) == origsegID) then 
+                        ! Check if the original segment was flipped, if so: flip also
+                        if (cell(i)%lines(j)%flipseg(si)) then 
+                            linesegID = [tsegID(:si-1), sortedsegID(ns:1:-1), &
+                                tsegID(si+1:)]
+                        else
+                            linesegID = [tsegID(:si-1), sortedsegID, tsegID(si+1:)]
+                        end if 
+                        sv = ggtmdata%cell(i)%lines(j)%vert(1)
+                        ev = ggtmdata%cell(i)%lines(j)%vert(ggtmdata%cell(i)%lines(j)%nv)
+                        call cell(i)%lines(j)%Initialize(ggtmdata, linesegID, sv, ev)
+                    end if 
+                end do 
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                ! hfline
+                !-------
+                tsegID = cell(i)%tubes(j)%hfline%segID
+                do si = 1, size(tsegID)
+                    if (tsegID(si) == origsegID) then 
+                        ! Check if the original segment was flipped, if so: flip also
+                        if (cell(i)%tubes(j)%hfline%flipseg(si)) then 
+                            linesegID = [tsegID(:si-1), sortedsegID(ns:1:-1), &
+                                tsegID(si+1:)]
+                        else
+                            linesegID = [tsegID(:si-1), sortedsegID, tsegID(si+1:)]
+                        end if 
+                        sv = ggtmdata%cell(i)%tubes(j)%hfline%vert(1)
+                        ev = ggtmdata%cell(i)%tubes(j)%hfline%vert(ggtmdata%cell(i)%tubes(j)%hfline%nv)
+                        call cell(i)%tubes(j)%hfline%Initialize(ggtmdata, linesegID, sv, ev)
+                    end if 
+                end do 
+
+                ! lfline
+                !-------
+                tsegID = cell(i)%tubes(j)%lfline%segID
+                do si = 1, size(tsegID)
+                    if (tsegID(si) == origsegID) then 
+                        ! Check if the original segment was flipped, if so: flip also
+                        if (cell(i)%tubes(j)%lfline%flipseg(si)) then 
+                            linesegID = [tsegID(:si-1), sortedsegID(ns:1:-1), &
+                                tsegID(si+1:)]
+                        else
+                            linesegID = [tsegID(:si-1), sortedsegID, tsegID(si+1:)]
+                        end if 
+                        sv = ggtmdata%cell(i)%tubes(j)%lfline%vert(1)
+                        ev = ggtmdata%cell(i)%tubes(j)%lfline%vert(ggtmdata%cell(i)%tubes(j)%lfline%nv)
+                        call cell(i)%tubes(j)%lfline%Initialize(ggtmdata, linesegID, sv, ev)
+                    end if 
+                end do                 
+            end do 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
     ! Segment cleaning (removal of almost coinciding points)
     subroutine CleanGGTMSegment(segment)
 
@@ -10122,14 +10337,16 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
 
     ! GGTM line initialization
-    subroutine InitializeGGTMFieldLineData(line, ggtmdata, segID)
+    subroutine InitializeGGTMFieldLineData(line, ggtmdata, segID, sv, ev)
 
         ! Description
         !============
         ! This routine initializes the GGTM field line, based on the 
         ! segments that the field line consists of (these should be 
         ! given in the correct order in segID and should map to the
-        ! correct segments in ggtmdata).
+        ! correct segments in ggtmdata). Furthermore, the start and 
+        ! end vertex where the line should start and end should be given.
+        ! This is to ensure the correct orientation afterwards.
         
         ! Note: any previously specified refinement options will 
         ! not be overwritten by this routine
@@ -10138,8 +10355,8 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         class(GGTMFieldlineDataUDT)         :: line 
-        type(GGTMDataUDT), intent(in)       :: ggtmdata
-        integer(I8), intent(in)             :: segID(:)
+        type(GGTMDataUDT), intent(inout)    :: ggtmdata ! inout, because the line can belong to ggtmdata itself... 
+        integer(I8), intent(in)             :: segID(:), sv, ev
 
         ! Auxiliary
         real(R8)                            :: Ltot
@@ -10153,6 +10370,13 @@ module ggmod_gridgeneration2D
 
         ! Loop
         integer(I8)                         :: i 
+
+        ! Checks
+        !=======
+        if ((sv == 0) .or. (ev == 0)) then 
+            call gdErrorHandler('InitializeGGTMFieldLineData: start or end ' // & 
+                'vertex ID is zero, not supported. Check input')
+        end if 
 
         ! Construct
         !==========
@@ -10284,6 +10508,19 @@ module ggmod_gridgeneration2D
         ! Add vertices
         call line%AddVertexCoordinates(dlcv)
         call line%AddVertexIDs(vert, isnodevert)
+
+        ! Check if we need to flip
+        if (line%vert(1) == sv .and. line%vert(line%nv) == ev) then 
+            ! All good
+        elseif (line%vert(1) == ev .and. line%vert(line%nv) == sv) then 
+            ! All good, but flip
+            call line%Flip()
+        else
+            ! All bad
+            call gdErrorHandler('InitializeGGTMFieldLineData: could not ' // & 
+                'find original start and end vertex of line, this ' // & 
+                'is a bug')
+        end if 
                 
         ! Housekeeping
         !=============
@@ -10309,11 +10546,12 @@ module ggmod_gridgeneration2D
         !==================
         ! Arguments
         class(GGTMFieldlineDataUDT)                 :: line 
-        type(GGTMDataUDT), intent(in)               :: ggtmdata
+        type(GGTMDataUDT), intent(inout)            :: ggtmdata
         logical, intent(in)                         :: back 
         integer(I8), intent(in)                     :: segmentID
 
         ! Auxiliary
+        integer(I8)                             :: sv, ev
         integer(I8), allocatable, dimension(:)  :: newsegID
 
         ! Loop
@@ -10344,12 +10582,32 @@ module ggmod_gridgeneration2D
         ! Append segment
         if (back) then 
             newsegID = [line%segID, segmentID]
+            sv = line%vert(1)
+            if (line%vert(line%nv) == ggtmdata%seg(segmentID)%sv) then 
+                ev = ggtmdata%seg(segmentID)%ev 
+            elseif (line%vert(line%nv) == ggtmdata%seg(segmentID)%ev) then 
+                ev = ggtmdata%seg(segmentID)%sv 
+            else
+                ! Weird, segment is not adjacent to line
+                call gdErrorHandler('AppendGGTMFieldLineSegment: segment does ' // & 
+                    'not have any vertices in common with line at end, unexpected')
+            end if  
         else
             newsegID = [segmentID, line%segID]
+            ev = line%vert(line%nv)
+            if (line%vert(1) == ggtmdata%seg(segmentID)%sv) then 
+                sv = ggtmdata%seg(segmentID)%ev 
+            elseif (line%vert(1) == ggtmdata%seg(segmentID)%ev) then 
+                sv = ggtmdata%seg(segmentID)%sv 
+            else
+                ! Weird, segment is not adjacent to line
+                call gdErrorHandler('AppendGGTMFieldLineSegment: segment does ' // & 
+                    'not have any vertices in common with line at start, unexpected')
+            end if  
         end if 
 
         ! Rebuild line
-        call line%Initialize(ggtmdata, newsegID)
+        call line%Initialize(ggtmdata, newsegID, sv, ev)
 
     end subroutine
 
@@ -10421,7 +10679,7 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: vind, tsegID, segvind(1:2), &
             vindseg, indl1, indl2, tsegIDind, sv, ev
-        integer(I8), allocatable, dimension(:)  :: tvertID, newsegID
+        integer(I8), allocatable, dimension(:)  :: tvertID
         real(R8), allocatable, dimension(:)     :: xl, yl, tdlcv, &
             txl, tyl
         type(GGTMSegmentUDT)                    :: tempseg(1:2), tseg
@@ -10554,26 +10812,10 @@ module ggmod_gridgeneration2D
         tvertID = line%vert(vind+1:segvind(2)-1)
         call ggtmdata%seg(ggtmdata%nseg)%AddVertices(tdlcv, tvertID)
 
-        ! Reconstruct line
-        !=================
-        ! Reconstruct based on new segment IDs
-        newsegID = [line%segID(1:tsegIDind-1), ggtmdata%nseg-1, ggtmdata%nseg, &
-            line%segID(tsegIDind+1:line%ns)]
-        call line%Initialize(ggtmdata, newsegID)
-
-        ! Check if we need to flip
-        if (line%vert(1) == sv .and. line%vert(line%nv) == ev) then 
-            ! All good
-        elseif (line%vert(1) == ev .and. line%vert(line%nv) == sv) then 
-            ! All good, but flip
-            call line%Flip()
-        else
-            ! All bad
-            call gdErrorHandler('splitGGTMFieldLineAtVertex: could not ' // & 
-                'find original start and end vertex of line, this ' // & 
-                'is a bug')
-        end if 
-
+        ! Update ggtmdata
+        !================
+        call ggtmdata%ReplaceSegment(tsegID, [ggtmdata%nseg-1, ggtmdata%nseg])
+        
     end subroutine
 
     ! GGTM line splitting, multiple vertices
@@ -10587,8 +10829,8 @@ module ggmod_gridgeneration2D
         ! line. No other operations on the line itself are performed, 
         ! except for adding the segments.  
 
-        ! Note: old segments are not yet deleted nor are other lines
-        ! updated! Perhaps need to track this in the future...
+        ! Note: old segments are not yet deleted, but ggtmdata is updated
+        ! using the replaceGGTMSegment routine. 
 
         ! Declare variables
         !==================
@@ -10600,9 +10842,9 @@ module ggmod_gridgeneration2D
         ! Auxiliary
         integer(I8)                             :: segvind(1:2), &
             indlstart, indlend, sv, ev, nv, startv, endv, &
-            nsegvID, vindsegstart, vindsegend, segID
+            nsegvID, vindsegstart, vindsegend, segID, thissegID
         integer(I8), allocatable, dimension(:)  :: tvertID, newsegID, &
-            vind, tvID, segvID, linesegID, linevind
+            vind, tvID, segvID, linesegID, linevind, tempsegID
         real(R8), allocatable, dimension(:)     :: xl, yl, tdlcv, &
             txl, tyl
         type(GGTMSegmentUDT)                    :: tseg
@@ -10762,6 +11004,7 @@ module ggmod_gridgeneration2D
             yl = tseg%yl
 
             ! Loop over all new segments to be constructed
+            allocate(tempsegID(0))
             do j = 1, nsegvID-1
 
                 ! Check where the vertex is located in this segment
@@ -10810,6 +11053,7 @@ module ggmod_gridgeneration2D
 
                 ! Initialize segment coordinates
                 segID = segID + 1
+                tempsegID = [tempsegID, segID]
                 call ggtmdata%seg(segID)%Initialize(txl, tyl, &
                     tseg%fsID, tseg%TMfaceID, segvID(j), segvID(j+1), &
                     tseg%TMfacetype)
@@ -10819,26 +11063,15 @@ module ggmod_gridgeneration2D
                 tvertID = line%vert(linevind(j)+1:linevind(j+1)-1)
                 call ggtmdata%seg(segID)%AddVertices(tdlcv, tvertID)
 
-            end do 
+            end do
+            
+            ! Update ggtmdata (and by doing so the line)
+            thissegID = line%segID(i)
+            call ggtmdata%ReplaceSegment(thissegID, tempsegID)
+
+            ! Housekeeping
+            deallocate(tempsegID)
         end do
-
-        ! Reconstruct line
-        !=================
-        ! Reconstruct based on new segment IDs
-        call line%Initialize(ggtmdata, linesegID)
-
-        ! Check if we need to flip
-        if (line%vert(1) == sv .and. line%vert(line%nv) == ev) then 
-            ! All good
-        elseif (line%vert(1) == ev .and. line%vert(line%nv) == sv) then 
-            ! All good, but flip
-            call line%Flip()
-        else
-            ! All bad
-            call gdErrorHandler('splitGGTMFieldLineAtVertex: could not ' // & 
-                'find original start and end vertex of line, this ' // & 
-                'is a bug')
-        end if 
 
     end subroutine
 
@@ -16526,7 +16759,7 @@ module ggmod_gridgeneration2D
             allsepIDs, tfv, tfsepv, allTPlabels, uvesstructlabels, &
             reslabels, facelabelsGG, facelabelsGD, allstructurelabels, &
             uallstructurelabels, vesselfID, flabels, templabels, &
-            tempf, fclbllist, strIDlist
+            tempf, fclbllist, strIDlist, vesselfaceID
         integer(I8), allocatable                    :: edges(:, :), &
             vesstructlabels(:, :), linelabels(:, :), vertlabels(:, :)
         logical, allocatable, dimension(:)          :: &
@@ -16916,6 +17149,8 @@ module ggmod_gridgeneration2D
             ! Compute face labels of boundary faces (other labels are
             ! zero)
             flabels = pack(flabels, isvesselface)
+            allocate(vesselfaceID(count(isvesselface)))
+            vesselfaceID = pack(allfID, isvesselface)
             !call vessel%GetVesselStructureLabelsOnEdges(&
             !    xv(pack(fv(:, 1), isvesselface)), yv(pack(fv(:, 1), isvesselface)), &
             !    xv(pack(fv(:, 2), isvesselface)), yv(pack(fv(:, 2), isvesselface)), &
@@ -18872,19 +19107,7 @@ module ggmod_gridgeneration2D
         end do 
 
         ! Construct the line
-        call line%Initialize(ggtmdata, allsegIDs)
-
-        ! Check orientation
-        if (line%vert(1) == startv .and. line%vert(line%nv) == endv) then 
-            ! Correctly sorted, nothing to do
-        elseif (line%vert(1) == endv .and. line%vert(line%nv) == startv) then
-            ! Need to flip
-            call line%Flip()
-        else
-            ! Something wrong
-            call gdErrorHandler('ExtractTMCellAlignedBoundary: could not ' // &
-                'find start or end vertex after extracting line')
-        end if  
+        call line%Initialize(ggtmdata, allsegIDs, startv, endv)
 
         ! Housekeeping
         !=============
