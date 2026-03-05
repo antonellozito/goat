@@ -17040,6 +17040,8 @@ module ggmod_gridgeneration2D
                     srf     => celldata(i)%srf,     &
                     erf     => celldata(i)%erf,     &
                     tubes   => celldata(i)%tubes,   &
+                    hffaces => celldata(i)%hffaces, &
+                    lffaces => celldata(i)%lffaces, &
                     srfline => facedata(celldata(i)%srf)%line,  &
                     erfline => facedata(celldata(i)%erf)%line   &
                     )
@@ -17140,6 +17142,114 @@ module ggmod_gridgeneration2D
                     ! Housekeeping
                     deallocate(tempf)
                 end if  
+
+                ! Check hf faces
+                do k = 1, size(hffaces)
+                    if (topomesh%face%type(hffaces(k)) == TMfacealbndID) then 
+                        ! Take face data
+                        associate(thisline => facedata(hffaces(k))%line)
+
+                        ! Update to be sure
+                        call thisline%UpdateLineData(ggtmdata)
+
+                        ! Compute vertex labels on original line coordinates
+                        call vessel%GetVesselStructureLabelsOnPoints(thisline%xl, &
+                            thisline%yl, linelabels)
+
+                        ! Compute vertex labels of vertices
+                        call vessel%GetVesselStructureLabelsOnPoints(thisline%xv, &
+                            thisline%yv, vertlabels)
+
+                        ! Get all face indices
+                        allocate(tempf(thisline%nv-1))
+                        do j = 1, thisline%nv-1
+                            call MapVertexPairToFace(thisline%vert(j), thisline%vert(j+1), &
+                                simgrid%face%vert, simgrid%face%ntot, tempfID)
+                            tempf(j) = tempfID 
+                        end do 
+
+                        ! Determine for each face the label
+                        do j = 1, size(tempf)
+                            ! Add labels on vertices
+                            templabels = [vertlabels(j, :), vertlabels(j+1, :)]
+                            
+                            ! Loop over all labels of points in between 
+                            pointstart = findloc(thisline%dlcv(j) < thisline%dllc, &
+                                .false., 1, back=.true.)+1
+                            pointend = findloc(thisline%dlcv(j+1) >= thisline%dllc, &
+                                .false., 1, back=.false.)-1
+
+                            ! Add labels
+                            templabels = [templabels, linelabels(pointstart:pointend, 1), &
+                                linelabels(pointstart:pointend, 2)]
+
+                            ! Remove zeros
+                            templabels = pack(templabels, templabels /= 0)
+
+                            ! Take minimal value
+                            flabels(tempf(j)) = minval(templabels)
+
+                        end do 
+
+                        ! Housekeeping
+                        deallocate(tempf)
+                        end associate
+                    end if 
+                end do 
+
+                ! Check lf faces
+                do k = 1, size(lffaces)
+                    if (topomesh%face%type(lffaces(k)) == TMfacealbndID) then 
+                        ! Take face data
+                        associate(thisline => facedata(lffaces(k))%line)
+
+                        ! Update to be sure
+                        call thisline%UpdateLineData(ggtmdata)
+
+                        ! Compute vertex labels on original line coordinates
+                        call vessel%GetVesselStructureLabelsOnPoints(thisline%xl, &
+                            thisline%yl, linelabels)
+
+                        ! Compute vertex labels of vertices
+                        call vessel%GetVesselStructureLabelsOnPoints(thisline%xv, &
+                            thisline%yv, vertlabels)
+
+                        ! Get all face indices
+                        allocate(tempf(thisline%nv-1))
+                        do j = 1, thisline%nv-1
+                            call MapVertexPairToFace(thisline%vert(j), thisline%vert(j+1), &
+                                simgrid%face%vert, simgrid%face%ntot, tempfID)
+                            tempf(j) = tempfID 
+                        end do 
+
+                        ! Determine for each face the label
+                        do j = 1, size(tempf)
+                            ! Add labels on vertices
+                            templabels = [vertlabels(j, :), vertlabels(j+1, :)]
+                            
+                            ! Loop over all labels of points in between 
+                            pointstart = findloc(thisline%dlcv(j) < thisline%dllc, &
+                                .false., 1, back=.true.)+1
+                            pointend = findloc(thisline%dlcv(j+1) >= thisline%dllc, &
+                                .false., 1, back=.false.)-1
+
+                            ! Add labels
+                            templabels = [templabels, linelabels(pointstart:pointend, 1), &
+                                linelabels(pointstart:pointend, 2)]
+
+                            ! Remove zeros
+                            templabels = pack(templabels, templabels /= 0)
+
+                            ! Take minimal value
+                            flabels(tempf(j)) = minval(templabels)
+
+                        end do 
+
+                        ! Housekeeping
+                        deallocate(tempf)
+                        end associate
+                    end if 
+                end do 
 
                 ! Housekeeping
                 end associate
@@ -18010,7 +18120,7 @@ module ggmod_gridgeneration2D
         integer(I8), allocatable, dimension(:)      :: edgeID, vertID, &
             splitvertID, uedgeID, sortind, allvert, &
             voidedgevID1, voidedgevID2, vesseledgeID1, vesseledgeID2, &
-            tempf
+            tempf, bndfaces
         integer(I8), allocatable, dimension(:, :)   :: labels, &
             voidedgevID
         logical, allocatable, dimension(:)          :: isalbndface, &
@@ -18184,6 +18294,8 @@ module ggmod_gridgeneration2D
                 srf     => celldata(i)%srf,     &
                 erf     => celldata(i)%erf,     &
                 tubes   => celldata(i)%tubes,   &
+                hffaces => celldata(i)%hffaces, &
+                lffaces => celldata(i)%lffaces, &
                 srfline => facedata(celldata(i)%srf)%line,  &
                 erfline => facedata(celldata(i)%erf)%line   &
                 )
@@ -18403,8 +18515,117 @@ module ggmod_gridgeneration2D
                 ! Housekeeping
                 deallocate(tempf, includepoints, tempdlcv)
             end if 
-            
+            bndfaces = [hffaces, lffaces]
+            do k = 1, size(bndfaces)
+                if (topomesh%face%type(bndfaces(k)) == TMfacealbndID) then 
+                    ! Update to be sure
+                    call facedata(bndfaces(k))%line%UpdateLineData(ggtmdata)
 
+                    ! Copy 
+                    templine = facedata(bndfaces(k))%line 
+
+                    ! Get all face indices
+                    allocate(tempf(srfline%nv-1))
+                    do j = 1, srfline%nv-1
+                        call MapVertexPairToFace(srfline%vert(j), srfline%vert(j+1), &
+                            simgrid%face%vert, simgrid%face%ntot, tempfID)
+                        tempf(j) = tempfID 
+                    end do 
+
+                    ! Refine templine 
+                    allocate(tempdlcv(size(templine%dllc)*2-1))
+                    do j = 1, size(templine%dllc)-1
+                        tempdlcv(2*j-1) = templine%dllc(j)
+                        tempdlcv(2*j) = 0.5*(templine%dllc(j) + templine%dllc(j+1))
+                    end do 
+                    tempdlcv(size(tempdlcv)) = templine%dllc(size(templine%dllc))
+                    
+                    ! Refine based on void vertices
+                    do j = 1, size(tempf)
+                        ! Skip non-void faces
+                        if (face%label(tempf(j)) >= 0) then 
+                            cycle 
+                        end if
+
+                        ! Split and refine at first vertex if not on templine
+                        ! already 
+                        if (.not. any(tempdlcv == srfline%dlcv(j))) then 
+                            temploc = findloc(tempdlcv < srfline%dlcv(j), &
+                                .true., 1, back=.true.)
+                            if (temploc == 0) then 
+                                temploc = 1
+                            end if 
+                            tempdlcv = [tempdlcv(1:temploc), &
+                                0.5*(tempdlcv(temploc) + srfline%dlcv(j)), &
+                                0.5*(tempdlcv(temploc+1) + srfline%dlcv(j+1)), &
+                                tempdlcv(temploc+1:)]
+                        end if 
+
+                        ! Split and refine at second vertex if not on templine
+                        ! already 
+                        if (.not. any(tempdlcv == srfline%dlcv(j+1))) then 
+                            temploc = findloc(tempdlcv < srfline%dlcv(j+1), &
+                                .true., 1, back=.true.)
+                            if (temploc == 0) then 
+                                temploc = 1
+                            end if 
+                            tempdlcv = [tempdlcv(1:temploc), &
+                                0.5*(tempdlcv(temploc) + srfline%dlcv(j+1)), &
+                                0.5*(tempdlcv(temploc+1) + srfline%dlcv(j+1)), &
+                                tempdlcv(temploc+1:)]
+                        end if 
+
+                    end do 
+                    templine%dlcv = tempdlcv 
+                    
+                    ! If any void faces present (i.e. negative label), remove
+                    ! points that lie on these void faces
+                    allocate(includepoints(size(templine%dlcv)))
+                    includepoints = .true. 
+                    do j = 1, size(tempf)
+                        ! Skip if not void face
+                        if (face%label(tempf(j)) >= 0) then 
+                            cycle 
+                        end if 
+
+                        ! Loop over all labels of points in between 
+                        pointstart = findloc(srfline%dlcv(j) < templine%dlcv, &
+                            .false., 1, back=.true.)+1
+                        pointend = findloc(srfline%dlcv(j+1) >= templine%dlcv, &
+                            .false., 1, back=.false.)-1
+
+                        ! Mark for removal
+                        includepoints(pointstart:pointend) = .false. 
+
+                    end do 
+
+                    ! Remove end points if they are split vertices
+                    if (srfline%vert(1) <= topomesh%vert%ntot) then 
+                        if (issplitvert(srfline%vert(1))) then 
+                            includepoints(1) = .false. 
+                        end if 
+                    end if 
+                    if (srfline%vert(srfline%nv) <= topomesh%vert%ntot) then 
+                        if (issplitvert(srfline%vert(srfline%nv))) then 
+                            includepoints(size(includepoints)) = .false. 
+                        end if 
+                    end if 
+
+                    tempdlcv = pack(templine%dlcv, includepoints)
+                    call templine%AddVertexCoordinates(tempdlcv)
+                    
+                    ! Evaluate
+                    call tempvoidplf%EvaluateLabel(templine%xv, templine%yv, labels, &
+                        edgeIDopt=edgeID)
+
+                    ! Set edges to false
+                    where (edgeID /= 0) isvoidedge(edgeID) = .false. 
+
+                    ! Housekeeping
+                    deallocate(tempf, includepoints, tempdlcv)
+                end if 
+            end do 
+            
             ! Housekeeping
             end associate
         end do
@@ -18421,12 +18642,16 @@ module ggmod_gridgeneration2D
         voidedgevID(:, 2) = voidedgevID2 
         call voidps%Construct(voidedgevID, [vert%x, plfv%xp], [vert%y, plfv%yp])
 
-        ! Orient
-        call voidps%OrientNestedClosedPolygons(flag)
-        if (flag /= 0) then 
-            print *, 'warning: void region polygons could not be oriented, ' // & 
-                'output may be unexpected!'
-        end if 
+        ! Orient (only if polygon present)
+        if (voidps%np > 0) then 
+            call voidps%OrientNestedClosedPolygons(flag)
+            if (flag /= 0) then 
+                print *, 'warning: void region polygons could not be oriented, ' // & 
+                    'output may be unexpected!'
+            end if 
+        else
+            print *, 'ComputeVoidRegionPolygonSet: no void polygons detected'
+        end if
 
         ! Flip
         do i = 1, voidps%np 
