@@ -9617,6 +9617,10 @@ module ggmod_topology2D
         !       dangling vertices) and simplify the mesh. 
         ! 8)    Reconstruct all interconnections etc.
 
+        ! Modules
+        !========
+        use mod_search, only: findloc1D
+
         ! Declare variables
         !==================
         ! Arguments
@@ -9938,6 +9942,8 @@ module ggmod_topology2D
                     tubecase = 3
                 end if 
             end if 
+
+            print *, 'tubecase: ', tubecase
 
             ! Get vertices
             tvmark = [topomesh%face%vert(tfmark, 1), topomesh%face%vert(tfmark, 2)]
@@ -10320,8 +10326,6 @@ module ggmod_topology2D
         ! faces. 
 
         ! Initialize
-        allocate(keepc(size(allc)))
-        keepc = .true.
         ntpc = size(allc)
         allocate(sc(ntpc), scr(ntpc), faceind(ntpc), sf(topomesh%face%ntot), &
             sfr(topomesh%face%ntot), contourind(topomesh%face%ntot), &
@@ -10377,6 +10381,8 @@ module ggmod_topology2D
         !$omp end parallel do 
 
         ! Process contours
+        allocate(keepc(ntpc))
+        keepc = .true. 
         do i = 1, ntpc
             ! Unpack
             tsc = sc(i)%Get()
@@ -10412,6 +10418,10 @@ module ggmod_topology2D
             ! Determine which intersections were in the starting face
             isstartface = tfaceind == cface%Get(i)   
 
+            ! Get the tube start and end face
+            tf = topomesh%tube%GetFace(tubeID(i))
+            tubef = [tf(1), tf(size(tf))]
+
             ! Determine which part(s) of contour(s) to keep
             if (allc(i)%isclosed) then ! closed contour
                 ! closed contour for open tube - need to check differently. 
@@ -10431,9 +10441,7 @@ module ggmod_topology2D
                     'open tube detected, code not yet verified'
 
                 ! Keep only intersections that intersect in one of the 
-                ! tube's radial faces
-                tf = topomesh%tube%GetFace(tubeID(i))
-                tubef = [tf(1), tf(size(tf))]
+                ! tube's bounding radial faces
                 allocate(keepf(size(tfaceind)))
                 keepf = .false. 
                 where (tfaceind == tubef(1) .or. tfaceind == tubef(2)) keepf = .true. 
@@ -10526,22 +10534,53 @@ module ggmod_topology2D
                         'a closed contour segment that lies within the tube')
                 end if 
 
-
                 ! Keep only part inbetween intersections
                 allc(i)%x = newx
                 allc(i)%y = newy
-                
+
+                ! Keep this contour
+                keepc(i) = .true.
                     
             else ! open contour
+                ! Normally, there should be two contour parts for the 
+                ! same tube, of which only one holds a segment that
+                ! lies within the tube (i.e. of which there is a segment
+                ! that starts at the starting face and ends at the tube 
+                ! end face). Other contours are marked for deletion. 
                 ! Check which intersection is the last intersection with
                 ! the starting face (should be first one)
-                intersectind = findloc(isstartface, .true., 1, back=.true.)
 
-                ! Sanity checks
+                ! Keep only intersections that intersect in one of the 
+                ! tube's bounding radial faces
+                allocate(keepf(size(tfaceind)))
+                keepf = .false. 
+                where (tfaceind == tubef(1) .or. tfaceind == tubef(2)) keepf = .true. 
+                tscr = pack(tscr, keepf)
+                xint = pack(xint, keepf)
+                yint = pack(yint, keepf)
+                tfaceind = pack(tfaceind, keepf)
+                deallocate(keepf)
+
+                ! Find start and end index that are subsequent. If none
+                ! found, then this is not the contour we're looking for 
+                ! and it should be deleted. 
+                intersectind = findloc1D(tfaceind, tubef(1:2))
+
+                ! Check if part is present
                 if (intersectind == 0) then 
-                    call gdErrorHandler('InsertAlignedVesselParts: ' // & 
-                        'contour intersects in boundary ' // & 
-                        'but not in neighbouring face - this is likely a bug')
+                    ! Remove contour and exit
+                    keepc(i) = .false. 
+                else
+                    ! Keep only this segment of the contour
+                    keepc(i) = .true.
+                    allc(i)%startsaddle = 0
+                    if (tscr(intersectind) == 0.0_R8) then 
+                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .true., .false.)
+                    else
+                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
+                            [tscr(intersectind:intersectind+1)], 'both', [-distfrac, -distfrac], .false., .false.)
+                    end if 
                 end if 
                 if (any(.not. isstartface(1:intersectind))) then 
                     ! Issue warning - we got intersections of the contour
@@ -10552,40 +10591,13 @@ module ggmod_topology2D
                         'starting boundary face. Unexpected, intersections ' // & 
                         'are removed'
                 end if 
-                if (intersectind == size(isstartface)) then 
-                    ! Only intersections in starting face, but no others 
-                    ! - no issue actually, since this is likely a contour
-                    ! that goes outside of the domain then. 
-                    !call gdErrorHandler('InsertAlignedVesselParts: ' // & 
-                    !    'contour intersects in tangency point ' // & 
-                    !    'and neighbouring face but not in other boundary ' // &
-                    !    'faces - unexpected')
-                    call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(intersectind)], 'start', [distfrac], .false., .false.)
-                else
-
-                    ! Keep only this part of the contour coordinates 
-                    ! In this case, we don't keep the starting point
-                    allc(i)%startsaddle = 0
-                    if (tscr(intersectind) == 0.0_R8) then 
-                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(intersectind:intersectind+1)], 'both', [distfrac, -distfrac], .false., .false.)
-                    else
-                        call DeleteCurveSegment(allc(i)%x, allc(i)%y, &
-                            [tscr(intersectind:intersectind+1)], 'both', [-distfrac, -distfrac], .false., .false.)
-                    end if 
-
-                end if
-                    !notdelind = [(k, k = 2, tsc(intersectind))]
-                !allc(i)%x = allc(i)%x(notdelind)
-                !allc(i)%y = allc(i)%y(notdelind)
+            
             end if 
 
             ! Housekeeping
             deallocate(isstartface)
 
         end do 
-        
 
         ! Housekeeping
         end associate
@@ -10596,16 +10608,22 @@ module ggmod_topology2D
         call CleanContours(allc)
         newfsIDs = fsIDs%Get()
         if (options%writedebugoutput) then 
-            allocate(allpc(size(allc)))
+            allocate(allpc(ntpc))
+            j = 0
             do i = 1, size(allc)
-                call allpc(i)%Construct(allc(i)%x, allc(i)%y)
+                !if (keepc(i)) then 
+                    j = j + 1
+                    call allpc(j)%Construct(allc(i)%x, allc(i)%y)
+                !end if 
             end do 
             call tempps%Construct(allpc)
             call tempps%WriteData('avpcontours_all_beforeinsertion')
         end if 
         do i = 1, size(allc)
-            call InsertTopologicalMeshContour(topomesh, magneticField, &
-                allc(i), curvetypes%Get(i), newfsIDs(i))
+            if (keepc(i)) then 
+                call InsertTopologicalMeshContour(topomesh, magneticField, &
+                    allc(i), curvetypes%Get(i), newfsIDs(i))
+            end if 
         end do
         topomesh%nFs = nfs
 
@@ -10626,7 +10644,7 @@ module ggmod_topology2D
         ! Split boundaries (should probably not happen but ok)
         call SplitTopologicalMeshFaces(topomesh)
 
-        ! Simplify 
+        ! Simplify
         call SimplifyTopologicalMeshFaces(topomesh)
 
         ! Vertex faces
