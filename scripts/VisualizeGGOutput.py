@@ -98,6 +98,18 @@ try:
 except:
     print("Could not plot structure.dat")
 
+try:
+    # Load fort.78
+    vals = dh.ReadFort78File('fort.78')
+
+    # Visualize
+    plotter.PlotPolygons2D(vals[:, 0], vals[:, 1], 2, linewidth=2, color='r', label='void polygons')
+    thisaxes = plt.gca()
+    thisaxes.legend()
+except: 
+    print("Could not load the void polygons from fort.78 file")
+
+
 # Face labels
 try:
     # At this point, the simulation grid has to be loaded or it will not 

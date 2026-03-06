@@ -1663,6 +1663,10 @@ module ggmod_topology2D
                 sID = [sID, bndpol(i)%ne]
                 eID = [eID, eID(1)]
             end if 
+            if (sID(size(sID)) == bndpol(i)%ne .and. (sID(1) /= 1)) then 
+                sID = [1, sID]
+                eID = [eID(size(eID)), eID]
+            end if 
             call ExtractTopologicalFacesFromPolygon(bndpol(i), eID, sID, &
                 tx, ty, vf1, vf2, xf, yf)  
             deallocate (sortind) 
@@ -13612,6 +13616,7 @@ module ggmod_topology2D
                 tv = GetTMCellVert(topomesh%cell, thesecells(i))
                 print *, 'vertices: ', tv 
             end do 
+            call WriteTopologicalMesh(topomesh, 'topomesh_tube', .false.)
             deallocate(thesecells)
         end if 
 

@@ -236,6 +236,7 @@ module PolygonLevelsetFunction2D
             yf(:), nxp(:), nyp(:), tnp(:), nxpv(:, :), &
             nypv(:, :), crossprod(:), thetav(:), xp1(:), xp2(:), &
             yp1(:), yp2(:)
+        integer(I8), allocatable, dimension(:)      :: vp, vp1, vp2
         integer(I8), allocatable, dimension(:, :)   :: edgelabel, &
             vertlabel
 
@@ -1025,7 +1026,8 @@ module PolygonLevelsetFunction2D
         ! Auxiliary
         integer(I8)                                 :: np, flag, ne, nl
         integer(I8), allocatable                    :: tempvertlabel(:, :), &
-            tempedgelabel(:, :), vertlabelp(:, :), edgelabelp(:, :)
+            tempedgelabel(:, :), vertlabelp(:, :), edgelabelp(:, :), &
+            vp(:), vp1(:), vp2(:)
 
         real(R8), allocatable                       :: xe(:, :), &
             ye(:, :), nx(:), ny(:), nn(:), tx(:), ty(:), tn(:), xp(:), &
@@ -1035,8 +1037,7 @@ module PolygonLevelsetFunction2D
             yp2(:), txp1(:), typ1(:), txp2(:), typ2(:)
 
         ! Loop
-        integer(I8)                                 :: i, ce, ce2
-
+        integer(I8)                                 :: i, ce, ce2, k 
         ! Initialize
         !===========
         ! Check polygonset 
@@ -1070,7 +1071,8 @@ module PolygonLevelsetFunction2D
         allocate(nxpv(np, 2), nypv(np, 2), xp(np), yp(np), &
             xf(size(xe, 1)), yf(size(xe, 1)), xp1(size(xe, 1)),  &
             yp1(size(xe, 1)), xp2(size(xe, 1)), yp2(size(xe, 1)), &
-            vertlabelp(np, nl), edgelabelp(size(xe, 1), nl))
+            vertlabelp(np, nl), edgelabelp(size(xe, 1), nl), &
+            vp(np), vp1(size(xe, 1)), vp2(size(xe, 1)))
 
         ! Compute vertex regions
         ce = 0
@@ -1124,6 +1126,7 @@ module PolygonLevelsetFunction2D
             ! Add
             xp(ce+1:ce+ne+1) = tempx 
             yp(ce+1:ce+ne+1) = tempy 
+            vp(ce+1:ce+ne+1) = [(k, k = ce+1, ce+ne+1)]
             vertlabelp(ce+1:ce+ne+1, :) = tempvertlabel
             edgelabelp(ce2+1:ce2+ne, :) = tempedgelabel
             nxpv(ce+1:ce+ne+1, :) = tempnx ! normals should be oriented outwards already
@@ -1137,6 +1140,8 @@ module PolygonLevelsetFunction2D
             xp2(ce2+1:ce2+ne) = txp2
             yp1(ce2+1:ce2+ne) = typ1
             yp2(ce2+1:ce2+ne) = typ2
+            vp1(ce2+1:ce2+ne) = vp(ce+1:ce+ne)
+            vp2(ce2+1:ce2+ne) = vp(ce+2:ce+ne+1)
 
 
             ! Update counter
@@ -1161,6 +1166,7 @@ module PolygonLevelsetFunction2D
         ! Add to plf
         plf%xp      = xp 
         plf%yp      = yp
+        plf%vp      = vp 
         plf%xp1     = xp1 
         plf%yp1     = yp1
         plf%xp2     = xp2 
@@ -1176,6 +1182,8 @@ module PolygonLevelsetFunction2D
         plf%crossprod   = crossprod
         plf%edgelabel = edgelabelp 
         plf%vertlabel = vertlabelp
+        plf%vp1     = vp1
+        plf%vp2     = vp2 
 
         ! Housekeeping
         !=============
@@ -1769,7 +1777,7 @@ module PolygonLevelsetFunction2D
     end subroutine
 
     ! Label evaluation
-    subroutine EvaluatePLF2DClosedExactLabel(plf, xq, yq, vq)
+    subroutine EvaluatePLF2DClosedExactLabel(plf, xq, yq, vq, edgeIDopt, vertIDopt)
 
         ! Description
         !============
@@ -1780,6 +1788,10 @@ module PolygonLevelsetFunction2D
         ! as originally given during the construction phase. No 
         ! derivatives etc are returned. 
 
+        ! Note: optionally, the edge/vertex ID of the PLF which was used
+        ! to evaluate the label is returned in edgeIDopt/vertIDopt 
+        ! (zero if not on edge/vertex)
+
         use iso_fortran_env
         use, intrinsic :: ieee_arithmetic
 
@@ -1789,13 +1801,14 @@ module PolygonLevelsetFunction2D
         class(PolygonLevelsetFunction2DClosedExactUDT)  :: plf 
         real(R8), intent(in)                        :: xq(:), yq(:)
         integer(I8), allocatable, intent(out)       :: vq(:, :) 
+        integer(I8), allocatable, optional, intent(out)     :: edgeIDopt(:), &
+            vertIDopt(:)
 
         ! Auxiliary
-
         integer(I8)                             :: nq, np, npe, &
             indmine, indminv, indmin, nl
         integer(I8), allocatable                :: eind(:), vind(:), &
-            minind(:)
+            minind(:), edgeID(:), vertID(:)
 
         real(R8)                                :: inf, signe, signv, &
             fv, fe, xqr, yqr, totsign(1:2)
@@ -1853,13 +1866,15 @@ module PolygonLevelsetFunction2D
         
         ! Allocate and initialize
         allocate(eind(nq), vind(nq), minind(nq), tdistvert(nq), &
-            tcrossprod(nq), val(nq))
+            tcrossprod(nq), val(nq), edgeID(nq), vertID(nq))
+        edgeID = 0
+        vertID = 0
 
         ! Loop 
         !=====
         allocate(myones(np))
         myones = 1
-        !$omp parallel do default(none) shared(xq, yq, plf, &
+        !$omp parallel do default(none) shared(xq, yq, plf, vertID, edgeID, &
         !$omp val, minind, vind, eind, tdistvert, tcrossprod, nq, myones, inf, vq) &
         !$omp private(xqr, yqr, vx, vy, dvn, tvn, dx, dy, theta, isinvert, &
         !$omp onedge, distedge, distvert, indmine, fe, signe, indminv, &
@@ -1917,8 +1932,10 @@ module PolygonLevelsetFunction2D
             val(iq) = val(iq)*totsign(indmin)
             if (indmin == 1) then 
                 vq(iq, :) = el(indmine, :)
+                edgeID(iq) = indmine 
             else
                 vq(iq, :) = vl(indminv, :)
+                vertID(iq) = indminv 
             end if 
             
         end do 
@@ -1927,6 +1944,12 @@ module PolygonLevelsetFunction2D
 
         ! Housekeeping
         !=============
+        if (present(edgeIDopt)) then 
+            edgeIDopt = edgeID 
+        end if 
+        if (present(vertIDopt)) then 
+            vertIDopt = vertID 
+        end if 
         end associate
 
     end subroutine
