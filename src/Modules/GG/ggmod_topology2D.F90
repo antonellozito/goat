@@ -233,7 +233,7 @@ module ggmod_topology2D
         real(R8), allocatable, dimension(:)     :: tubedpsi, tubelrad
         integer(I8), allocatable, dimension(:)  :: illegalfsIDs, splitfsIDs
         type(RealDynamicArrayUDT), allocatable, dimension(:)    :: &
-            facepsi, facedlcrad
+            facepsi, facedlcrad, facepsi_mono
         logical                                 :: allowsepmerge, &
             allowcoremerge, allowpfmerge, allowsepsimplify
         character(:), allocatable               :: mergetubemeth
@@ -5858,7 +5858,7 @@ module ggmod_topology2D
         type(TopomeshOptionsUDT), intent(in)    :: options 
 
         ! Auxiliary
-        real(R8), allocatable, dimension(:)     :: temp
+        real(R8), allocatable, dimension(:)     :: temp, temp_orig
 
         ! Loop
         integer(I8)                             :: i
@@ -5875,6 +5875,7 @@ module ggmod_topology2D
         if (allocated(tmadaptor%illegalfsIDs)) deallocate(tmadaptor%illegalfsIDs)
         if (allocated(tmadaptor%splitfsIDs)) deallocate(tmadaptor%splitfsIDs)
         if (allocated(tmadaptor%facepsi)) deallocate(tmadaptor%facepsi)
+        if (allocated(tmadaptor%facepsi_mono)) deallocate(tmadaptor%facepsi_mono)
         if (allocated(tmadaptor%facedlcrad)) deallocate(tmadaptor%facedlcrad)
         if (allocated(tmadaptor%tubedpsi)) deallocate(tmadaptor%tubedpsi)
         if (allocated(tmadaptor%tubelrad)) deallocate(tmadaptor%tubelrad)
@@ -5884,7 +5885,8 @@ module ggmod_topology2D
         ! Initialize
         allocate(tmadaptor%illegalfsIDs(0), tmadaptor%facepsi(face%ntot), &
             tmadaptor%facedlcrad(face%ntot), tmadaptor%tubedpsi(tube%ntot), &
-            tmadaptor%tubelrad(tube%ntot), tmadaptor%splitfsIDs(0))
+            tmadaptor%tubelrad(tube%ntot), tmadaptor%splitfsIDs(0), &
+            tmadaptor%facepsi_mono(face%ntot))
         allocate(tmadaptor%fieldtracer, source=fieldtracer)
 
         ! Copy (for face data updating later on)
@@ -5907,13 +5909,15 @@ module ggmod_topology2D
         !=============
         call wall_time(ts)
         ! Face psi values and radial length
-        !$omp parallel do if (.not. omp_in_parallel()) &
-        !$omp private(i, temp) &
-        !$omp shared(topomesh, fieldtracer, tmadaptor)
+        !$omp parallel do default(none) if (.not. omp_in_parallel()) &
+        !$omp private(i, temp, temp_orig) &
+        !$omp shared(topomesh, fieldtracer, tmadaptor, magneticField)
         do i = 1, face%ntot
             ! Compute
-            temp = GetTMFacePsiValueDistribution(topomesh, fieldtracer, i)
-            tmadaptor%facepsi(i) = ConstructRealDynamicArray(temp)
+            call GetTMFacePsiValueDistribution(topomesh, fieldtracer, i, &
+                temp, temp_orig)
+            tmadaptor%facepsi(i) = ConstructRealDynamicArray(temp_orig)
+            tmadaptor%facepsi_mono(i) = ConstructRealDynamicArray(temp)
             temp = GetTMFaceRadialLengthDistribution(topomesh, &
                 fieldtracer, magneticField, i)
             tmadaptor%facedlcrad(i) = ConstructRealDynamicArray(temp)
@@ -5981,7 +5985,7 @@ module ggmod_topology2D
             tf = topomesh%tube%GetFace(i)
 
             ! Evaluate psi criterion
-            call GetTMTubePsiLimits(topomesh, i, psimin, psimax, includealbndin=includealbnd)
+            call GetTMTubePsiLimitsTA(tmadaptor, topomesh, i, psimin, psimax, includealbndin=includealbnd)
             tmadaptor%tubedpsi(i) = max(psimax - psimin, 0.0_R8) 
 
             ! Evaluate radial length criterion
@@ -6298,8 +6302,11 @@ module ggmod_topology2D
         wasmerged = .false. 
         appliedsplitting = .false.
 
-        ! Compute criteria
-        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.false.) ! don't include aligned boundary faces here
+        ! Compute criteria 
+        ! Note: no aligned boundaries are included here because tubes 
+        ! may have overlapping psi values because of that, at which point they're not 
+        ! mergeable anyway anymore...
+        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.false.) ! don't include aligned boundary faces here 
         dpsi = tmadaptor%tubedpsi - tmadaptor%dpsimin 
         dlrad = tmadaptor%tubelrad - tmadaptor%lradmin
         ismarked = (dpsi < 0.0_R8) .or. (dlrad < 0.0_R8)
@@ -8667,7 +8674,8 @@ module ggmod_topology2D
         end if 
 
         ! Compute 
-        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.false.) ! don't include - assume checks on aligned boundaries done before
+        ! Note: include aligned boundaries here
+        call tmadaptor%EvaluateTMTubesMergeCriterion(topomesh, includealbndin=.true.) 
         thispsi = tmadaptor%tubedpsi(tubes)
         thislrad = tmadaptor%tubelrad(tubes)
         dpsi = thispsi - tmadaptor%dpsimin 
@@ -8719,13 +8727,14 @@ module ggmod_topology2D
                 ! Get the face coordinates and psi values
                 x = topomesh%face%x(tf)%Get()
                 y = topomesh%face%y(tf)%Get()
-                fval = tmadaptor%facepsi(tf)%Get()
+                fval = tmadaptor%facepsi_mono(tf)%Get()
 
                 ! Check if psi increases or decreases
                 isstartlf = (fval(size(fval)) - fval(1) >= 0.0_R8)
 
-                ! Evaluate tube psi bounds
-                call GetTMTubePsiLimits(topomesh, tubes(i), psimin, psimax)
+                ! Evaluate tube psi bounds - include aligned boundaries to prevent intersections with them
+                call GetTMTubePsiLimitsTA(tmadaptor, topomesh, &
+                    tubes(i), psimin, psimax, includealbndin=.true.)
 
                 ! Compute flux values for tracing
                 lffval = psimin + tmadaptor%dpsimin
@@ -8771,14 +8780,15 @@ module ggmod_topology2D
                 ! Re-evaluate the criterion and also query the face and
                 ! the used length distribution
                 call GetTMTubeRadialWidthTA(tmadaptor, topomesh, &
-                    tubes(i), lrad, tf, dlc)
+                    tubes(i), lrad, tf, dlc, includealbndin=.true.)
                 tracefaces(i) = tf
-                call GetTMTubePsiLimits(topomesh, tubes(i), psimin, psimax)
+                call GetTMTubePsiLimitsTA(tmadaptor, topomesh, &
+                    tubes(i), psimin, psimax, includealbndin=.true.)
 
                 ! Get the face coordinates and psi values
                 x = topomesh%face%x(tf)%Get()
                 y = topomesh%face%y(tf)%Get()
-                fval = tmadaptor%facepsi(tf)%Get()
+                fval = tmadaptor%facepsi_mono(tf)%Get()
 
                 ! Check if psi increases or decreases
                 isstartlf = (fval(size(fval)) - fval(1) >= 0.0_R8)
@@ -8819,6 +8829,7 @@ module ggmod_topology2D
                     lftracey(i) = temp(1)
 
                 end if 
+
             end if
 
             ! Check
@@ -9253,7 +9264,7 @@ module ggmod_topology2D
         newpsimax = posinfval_R8()
         newpsimin = -posinfval_R8()
         do i = 1, size(hftube)
-            call GetTMTubePsiLimits(topomesh, hftube(i), psimin, psimax)
+            call GetTMTubePsiLimitsTA(tmadaptor, topomesh, hftube(i), psimin, psimax)
             newpsimax = min(newpsimax, psimax)
             if (psimin >= psimax) then 
                 ! Not mergeable - return
@@ -9261,7 +9272,7 @@ module ggmod_topology2D
             end if 
         end do 
         do i = 1, size(lftube)            
-            call GetTMTubePsiLimits(topomesh, lftube(i), psimin, psimax)
+            call GetTMTubePsiLimitsTA(tmadaptor, topomesh, lftube(i), psimin, psimax)
             newpsimin = max(newpsimin, psimin)
             if (psimin >= psimax) then 
                 ! Not mergeable - return
@@ -9398,6 +9409,10 @@ module ggmod_topology2D
             call gdErrorHandler('RemoveFaceDataLogicalTA: size of remf ' // &
                 'does not correspond to size of facepsi')
         end if 
+        if (size(remf) /= size(tmadaptor%facepsi_mono)) then 
+            call gdErrorHandler('RemoveFaceDataLogicalTA: size of remf ' // &
+                'does not correspond to size of facepsi_mono')
+        end if 
         if (size(remf) /= size(tmadaptor%facedlcrad)) then 
             call gdErrorHandler('RemoveFaceDataLogicalTA: size of remf ' // &
                 'does not correspond to size of facepsi')
@@ -9406,6 +9421,7 @@ module ggmod_topology2D
         ! Remove
         !=======
         tmadaptor%facepsi = pack(tmadaptor%facepsi, .not. remf)
+        tmadaptor%facepsi_mono = pack(tmadaptor%facepsi_mono, .not. remf)
         tmadaptor%facedlcrad = pack(tmadaptor%facedlcrad, .not. remf)
 
     end subroutine
@@ -9428,9 +9444,9 @@ module ggmod_topology2D
 
         ! Auxiliary
         integer(I8)                             :: nforig, nnewf, tfID
-        real(R8), allocatable, dimension(:)     :: temp
+        real(R8), allocatable, dimension(:)     :: temp, temp_orig
         type(RealDynamicArrayUDT), allocatable, dimension(:)    :: &
-            newfacepsi, newfacedlcrad
+            newfacepsi, newfacedlcrad, newfacepsi_mono
 
         ! Loop
         integer(I8)                             :: i
@@ -9449,23 +9465,25 @@ module ggmod_topology2D
         end if 
 
         ! Initialize further
-        allocate(newfacepsi(nnewf), newfacedlcrad(nnewf))
+        allocate(newfacepsi(nnewf), newfacedlcrad(nnewf), newfacepsi_mono(nnewf))
 
         ! Add data
         !=========
         ! Face psi values and radial length
-        !$omp parallel do if ((.not. omp_in_parallel()) .and. &
+        !$omp parallel do default(none) if ((.not. omp_in_parallel()) .and. &
         !$omp (nnewf >= 2*omp_get_num_threads())) &
-        !$omp private(i, tfID, temp) &
+        !$omp private(i, tfID, temp, temp_orig) &
         !$omp shared(topomesh, tmadaptor, nforig, nnewf, &
-        !$omp newfacepsi, newfacedlcrad)
+        !$omp newfacepsi, newfacedlcrad, newfacepsi_mono)
         do i = 1, nnewf
             ! Set current face ID
             tfID = nforig + i
 
             ! Compute
-            temp = GetTMFacePsiValueDistribution(topomesh, tmadaptor%fieldtracer, tfID)
-            newfacepsi(i) = ConstructRealDynamicArray(temp)
+            call GetTMFacePsiValueDistribution(topomesh, tmadaptor%fieldtracer, tfID, &
+                temp, temp_orig)
+            newfacepsi_mono(i) = ConstructRealDynamicArray(temp)
+            newfacepsi(i) = ConstructRealDynamicArray(temp_orig)
             temp = GetTMFaceRadialLengthDistribution(topomesh, &
                 tmadaptor%fieldtracer, tmadaptor%magneticField, tfID)
             newfacedlcrad(i) = ConstructRealDynamicArray(temp)
@@ -9474,6 +9492,7 @@ module ggmod_topology2D
         
         ! Append
         tmadaptor%facepsi = [tmadaptor%facepsi, newfacepsi]
+        tmadaptor%facepsi_mono = [tmadaptor%facepsi_mono, newfacepsi_mono]
         tmadaptor%facedlcrad = [tmadaptor%facedlcrad, newfacedlcrad]
 
 
@@ -16042,8 +16061,8 @@ module ggmod_topology2D
     end function
 
     ! Topological metric computations
-    function GetTMFacePsiValueDistribution(topomesh, fieldtracer, &
-        faceID) result(psi)
+    subroutine GetTMFacePsiValueDistribution(topomesh, fieldtracer, &
+        faceID, psi, psi_orig)
 
         ! Description
         !============
@@ -16059,13 +16078,16 @@ module ggmod_topology2D
         ! inaccurate results, since there is likely some variation along
         ! the face. Thread carefully in that case. 
 
+        ! Note: we also return the original, non-monotonized distribution 
+        ! in psi_orig
+
         ! Declare variables
         !==================
         ! Arguments
         type(TopomeshUDT), intent(in)                   :: topomesh
         class(ContourtracerUDT), intent(in)             :: fieldtracer
         integer(I8), intent(in)                         :: faceID
-        real(R8), allocatable, dimension(:)             :: psi 
+        real(R8), allocatable, dimension(:), intent(out)    :: psi, psi_orig
 
         ! Auxiliary
         real(R8), allocatable, dimension(:)             :: xf, yf
@@ -16083,15 +16105,17 @@ module ggmod_topology2D
         allocate(psi(size(xf)))
         psi = 0.0_R8
         
-        ! Hedge for aligned faces
-        if (topomesh%face%fsID(faceID) /= 0) then 
+        ! Hedge for aligned faces - unless they're aligned boundary faces
+        if ((topomesh%face%fsID(faceID) /= 0) .and. (topomesh%face%type(faceID) /= TMfacealbndID)) then 
             ! Set uniform distribution and return
             psi = topomesh%fsfval%Get(topomesh%Face%fsID(faceID))
+            psi_orig = psi
             return 
         end if
 
         ! If we got here, it is a non-aligned face
         psi = fieldtracer%Evaluate(xf, yf)
+        psi_orig = psi
         psi(1) = topomesh%vert%fval(topomesh%face%vert(faceID, 1))
         psi(size(psi)) = topomesh%vert%fval(topomesh%face%vert(faceID, 2))
 
@@ -16113,7 +16137,7 @@ module ggmod_topology2D
         end if
 
 
-    end function 
+    end subroutine 
 
     function GetTMFaceRadialLengthDistribution(topomesh, fieldtracer, &
         magneticField, faceID) result(dlcrad)
@@ -16194,7 +16218,8 @@ module ggmod_topology2D
 
     end function
 
-    subroutine GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax, includealbndin)
+    subroutine GetTMTubePsiLimitsTA(tmadaptor, topomesh, tubeID, &
+        psimin, psimax, includealbndin)
 
         ! Description
         !============
@@ -16212,9 +16237,18 @@ module ggmod_topology2D
         ! point... If aligned boundaries should be included, one can 
         ! use the optional argument includealbndin and set it to .true. 
 
+        ! Note: this routine is very similar to the (old) GetTMTubesPsiLimitsTA
+        ! routine, with the exception that the psi values are now evaluated
+        ! on the true vertex locations of each boundary. This is necessary
+        ! to avoid wrong limits (and hence possible issues downstream)
+        ! because tangency points etc are removed by topomesh cleaning 
+        ! routines. It also provides a more discretely consistent 
+        ! approach. 
+
         ! Declare variables
         !==================
         ! Arguments
+        class(TopomeshAdaptorUDT), intent(in)   :: tmadaptor
         type(TopomeshUDT), intent(in)           :: topomesh 
         integer(I8), intent(in)                 :: tubeID
         real(R8), intent(out)                   :: psimin, psimax
@@ -16226,6 +16260,7 @@ module ggmod_topology2D
         logical                                 :: includealbnd
 
         ! Loop
+        integer(I8)                             :: i 
 
         ! Initialize
         !===========
@@ -16273,7 +16308,7 @@ module ggmod_topology2D
             ! issue warning
             if ((size(tf1) + size(tv1)) == 0) then 
                 ! May happen in some cases
-                print *, ('warning: GetTMTubePsiLimits: tube has only aligned ' // &
+                print *, ('warning: GetTMTubePsiLimitsTA: tube has only aligned ' // &
                     'boundary faces as neighbour at side 1, including these to determine ')
                 tf1 = tube%GetBndFace(tubeID, 1)
                 tv1 = tube%GetBndVert(tubeID, 1)
@@ -16282,7 +16317,7 @@ module ggmod_topology2D
             end if 
             if ((size(tf2) + size(tv2)) == 0) then 
                 ! May happen in some cases
-                print *, ('warning: GetTMTubePsiLimits: tube has only aligned ' // &
+                print *, ('warning: GetTMTubePsiLimitsTA: tube has only aligned ' // &
                 'boundary faces as neighbour at side 2, including these to determine ')
                 tf2 = tube%GetBndFace(tubeID, 2)
                 tv2 = tube%GetBndVert(tubeID, 2)
@@ -16295,19 +16330,30 @@ module ggmod_topology2D
         if ((size(tf1) + size(tv1)) == 0) then 
             ! Should not happen
             call WriteTopologicalMesh(topomesh, 'topomesh_error')
-            call gdErrorHandler('GetTMTubePsiLimits: tube has only aligned ' // &
+            call gdErrorHandler('GetTMTubePsiLimitsTA: tube has only aligned ' // &
                 'boundary faces as neighbour at side 1, unexpected')
         end if 
         if ((size(tf2) + size(tv2)) == 0) then 
             ! Should not happen
             call WriteTopologicalMesh(topomesh, 'topomesh_error')
-            call gdErrorHandler('GetTMTubePsiLimits: tube has only aligned ' // &
+            call gdErrorHandler('GetTMTubePsiLimitsTA: tube has only aligned ' // &
                 'boundary faces as neighbour at side 2, unexpected')
         end if 
 
         ! Get psi values
-        psi1 = [topomesh%fsfval%Get(vert%fsID(tv1)), topomesh%fsfval%Get(face%fsID(tf1))]
-        psi2 = [topomesh%fsfval%Get(vert%fsID(tv2)), topomesh%fsfval%Get(face%fsID(tf2))]
+        allocate(psi1(0), psi2(0))
+        do i = 1, size(tv1)
+            psi1 = [psi1, topomesh%fsfval%Get(vert%fsID(tv1(i)))]
+        end do 
+        do i = 1, size(tf1)
+            psi1 = [psi1, tmadaptor%facepsi(tf1(i))%Get()]
+        end do 
+        do i = 1, size(tv2)
+            psi2 = [psi2, topomesh%fsfval%Get(vert%fsID(tv2(i)))]
+        end do 
+        do i = 1, size(tf2)
+            psi2 = [psi2, tmadaptor%facepsi(tf2(i))%Get()]
+        end do 
 
         ! Check which side is low and which is high
         if (all(minval(psi1) > psi2)) then 
@@ -16319,7 +16365,7 @@ module ggmod_topology2D
             psimax = minval(psi2)
             psimin = maxval(psi1)
         else 
-            print *, 'GetTMTubePsiLimits: psi values seem to overlap, ' // &
+            print *, 'GetTMTubePsiLimitsTA: psi values seem to overlap, ' // &
                 'could not determine high and low psi side. psimin will ' // &
                 'be larger than psimax...'
             psimax = minval(psi1)
@@ -16329,7 +16375,6 @@ module ggmod_topology2D
         ! Housekeeping
         !=============
         end associate
-
 
     end subroutine
 
@@ -16401,7 +16446,8 @@ module ggmod_topology2D
         ! Compute
         !========
         ! Psi bounds
-        call GetTMTubePsiLimits(topomesh, tubeID, psimin, psimax, includealbnd)
+        call GetTMTubePsiLimitsTA(tmadaptor, topomesh, tubeID, &
+            psimin, psimax, includealbnd)
 
         ! Get tube faces
         tubef = tube%GetFace(tubeID)
@@ -16427,7 +16473,7 @@ module ggmod_topology2D
             ! Get face coordinates and monotonized psi distribution 
             xf = face%x(tubef(i))%Get()
             yf = face%y(tubef(i))%Get()
-            psif = tmadaptor%facepsi(tubef(i))%Get()
+            psif = tmadaptor%facepsi_mono(tubef(i))%Get()
 
             ! Hedge for psimin/psimax not lying on this face
             if (all(psimin > psif) .or. all(psimin < psif)) then 
