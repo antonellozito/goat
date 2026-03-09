@@ -9620,6 +9620,7 @@ module ggmod_topology2D
         ! Modules
         !========
         use mod_search, only: findloc1D
+        use mod_sort, only: setdiff
 
         ! Declare variables
         !==================
@@ -9642,7 +9643,8 @@ module ggmod_topology2D
             afendind, tfmark, facevert, tfnb1, tfnb2, newfsIDs,  &
             markedtpIDs, sortind, vindI, vindJ, tsc, tfaceind, &
             vertexmarkIDs, tfnbv1, tfnbv2, tubecase_override, tvf, &
-            tvmark, tubeID, tubecell, tubef, tempind
+            tvmark, tubeID, tubecell, tubef, tempind, remtubeID, &
+            difftubeID
         real(R8)                                :: avpminangle, tdl
         real(R8), allocatable, dimension(:)     :: tx, ty, xf, yf, dx, &
             dy, dn, bxf, byf, bnf, alpha, tpsinb1, tpsinb2, tpsitp, &
@@ -9942,8 +9944,6 @@ module ggmod_topology2D
                     tubecase = 3
                 end if 
             end if 
-
-            print *, 'tubecase: ', tubecase
 
             ! Get vertices
             tvmark = [topomesh%face%vert(tfmark, 1), topomesh%face%vert(tfmark, 2)]
@@ -10598,6 +10598,17 @@ module ggmod_topology2D
             deallocate(isstartface)
 
         end do 
+
+        ! Check if for all tubes contours were found. If not, issue 
+        ! message (not per se an error since the topomesh will be fine)
+        allocate(remtubeID(count(keepc)))
+        remtubeID = pack(tubeID, keepc)
+        call Setdiff(tubeID, remtubeID, difftubeID)
+        if (size(difftubeID) /= 0) then 
+            print *, 'InsertAlignedVesselParts: contours were not inserted ' // & 
+                'for tubes: ', difftubeID 
+        end if 
+        deallocate(remtubeID)
 
         ! Housekeeping
         end associate
