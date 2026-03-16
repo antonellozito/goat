@@ -347,7 +347,9 @@ module ggmod_gridgeneration2D
         !============
         ! Contains additional face data, including the grid vertices
         ! xv, yv - now stored as a GGTMFieldlineData type. Also contains
-        ! line refinement options (similar to celldata%linerefoptions)
+        ! line refinement options (similar to celldata%linerefoptions). 
+        ! Should have same dimensions as topomesh face data, as it 
+        ! only represents topomesh data. 
         type(GGTMFieldlineDataUDT)              :: line 
         type(GGTMFieldlineRefinementOptionsUDT) :: linerefoptions
 
@@ -402,7 +404,12 @@ module ggmod_gridgeneration2D
         ! Description
         !============
         ! This type contains additional information related to the 
-        ! topological mesh to construct a grid. 
+        ! topological mesh to construct a grid. Here, segments are the 
+        ! base element out of which other lines etc are constructed.
+        ! These segments may be added or removed. Faces, cells, vertices, 
+        ! and tubes are mirrored to the topomesh data itself and may 
+        ! therefore not be removed (at least not at the time of 
+        ! writing)
 
     
         type(GGTMVertexDataUDT), allocatable, dimension(:)  :: vert
@@ -416,6 +423,11 @@ module ggmod_gridgeneration2D
 
         ! Initializer
         procedure :: Initialize         => InitializeGGTMData
+
+        ! Segment addition/removal 
+        procedure :: AddSegment         => AddGGTMSegment
+        procedure :: RemoveGGTMSegmentLogical
+        generic :: RemoveSegment      => RemoveGGTMSegmentLogical
 
         ! Segment replacing
         procedure :: ReplaceSegment     => ReplaceGGTMSegment
@@ -2885,11 +2897,33 @@ module ggmod_gridgeneration2D
         vertmap = 0_I8
         vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
 
+        ! First, remove all segments that are not used anymore
+        call CleanGGTMData(ggtmdata)
+
         ! Loop and adjust IDs - first segments, then tubes
         do i = 1, ggtmdata%nseg 
+            ! First map
             ggtmdata%seg(i)%vert = vertmap(ggtmdata%seg(i)%vert)
             ggtmdata%seg(i)%sv = vertmap(ggtmdata%seg(i)%sv)
             ggtmdata%seg(i)%ev = vertmap(ggtmdata%seg(i)%ev)
+
+            ! Remove vertices 
+            keepind = ggtmdata%seg(i)%vert /= 0 
+            allocate(newvert(count(keepind)), newdlcv(count(keepind)))
+            newvert = pack(ggtmdata%seg(i)%vert, keepind)
+            newdlcv = pack(ggtmdata%seg(i)%dlcv, keepind)
+
+            ! Sanity checks
+            if (ggtmdata%seg(i)%sv == 0 .or. ggtmdata%seg(i)%ev == 0) then 
+                call gdErrorHandler('PostProcessVertexDistribution: start ' // &
+                    'or end of vertex segment was removed, unexpected')
+            end if 
+
+            ! Update
+            call ggtmdata%seg(i)%AddVertices(newdlcv, newvert)
+
+            ! Housekeeping
+            deallocate(newdlcv, newvert)
         end do 
         do i = 1, cell%ntot 
             ! Update
@@ -2897,6 +2931,10 @@ module ggmod_gridgeneration2D
                 call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
                 call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
             end do 
+        end do 
+        do i = 1, topomesh%face%ntot
+            ! Update
+            call ggtmdata%face(i)%line%UpdateLineData(ggtmdata)
         end do 
 
         ! Update number of grid vertices
@@ -6662,7 +6700,6 @@ module ggmod_gridgeneration2D
 
                 ! Update line data
                 call facedata(tubef(j))%line%UpdateSegmentData(ggtmdata)
-                
             end do 
 
             ! Housekeeping
@@ -9719,7 +9756,212 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Addition
+    subroutine AddGGTMSegment(ggtmdata, xl, yl, fsID, TMfaceID, &
+        sv, ev, TMfacetype)
+
+        ! Description
+        !============
+        ! Add a segment to the ggtmdata structure by appending it at the
+        ! end. Uses the 'INitializeGGTMSegment' routine under the hood
+        ! for actual segment construction. Assumed that segment counter 
+        ! was properly initialized
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)          :: ggtmdata
+        real(R8), intent(in), dimension(:)          :: xl, yl 
+        integer(I8), intent(in)                     :: fsID, TMfaceID, &
+            sv, ev, TMfacetype
+
+        ! Auxiliary
+        type(GGTMSegmentUDT)                        :: tseg 
+        
+        ! Add segment
+        !============
+        ! Update counter
+        ggtmdata%nseg = ggtmdata%nseg + 1
+
+        ! Construct segment
+        call tseg%Initialize(xl, yl, fsID, TMfaceID, sv, ev, TMfacetype)
+        
+        ! Add to ggtmdata
+        ggtmdata%seg = [ggtmdata%seg, tseg]
+
+    end subroutine
+
     ! Removal
+    subroutine RemoveGGTMSegmentLogical(ggtmdata, issegdeleted, mapping)
+
+        ! Description
+        !============
+        ! Delete a segment based on its segment ID. This routine also 
+        ! updates segment indices in other fields present in ggtmdata. 
+        ! Warnings/errors will be thrown if segment deletion causes 
+        ! deletion of faces or vertices. For the usecase of replacing 
+        ! segments of faces etc, use the ReplaceGGTMSegment routine 
+        ! instead, or manually replace the segments first before
+        ! deleting them. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                  :: ggtmdata 
+        logical, dimension(:), intent(in)   :: issegdeleted
+        integer(I8), allocatable, dimension(:), intent(out), optional :: mapping
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: mpg ! actual mapping
+        logical, allocatable, dimension(:)      :: isused, keepind
+        type(GGTMSegmentUDT), allocatable       :: tempseg(:)
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+
+        ! Initialize
+        !===========
+        ! Check input
+        if (size(issegdeleted) /= ggtmdata%nseg) then 
+            call gdErrorHandler('RemoveGGTMSegmentLogical: segment deletion ' // & 
+                'logical vector does not have the correct dimension')
+        end if
+
+        ! Unpack
+        associate(&
+            vert    => ggtmdata%vert,   &
+            face    => ggtmdata%face,   &
+            cell    => ggtmdata%cell,   &
+            tube    => ggtmdata%tube    &
+            )
+
+
+        ! Map segment IDs
+        !================
+        ! Determine mapping
+        allocate(mpg(ggtmdata%nseg))
+        k = 0
+        isused = .not. issegdeleted
+        mpg = 0
+        do i = 1, ggtmdata%nseg
+            if (isused(i)) then 
+                k = k + 1
+                mpg(i) = k
+            end if 
+        end do 
+
+        ! Vertices
+        do i = 1, size(vert)
+            ! Map
+            vert(i)%line%segID = mpg(vert(i)%line%segID)
+
+            ! Check
+            keepind = vert(i)%line%segID /= 0
+            if (size(keepind) == 0) then 
+                print *, 'vertex: ', i 
+                call gdErrorHandler('RemoveGGTMSegmentLogical: vertex ' // & 
+                    'had all segments deleted, unexpected')
+            end if 
+
+            ! Delete any zero segments and reinitialize
+            vert(i)%line%segID = pack(vert(i)%line%segID, keepind)
+            call vert(i)%line%UpdateLineData(ggtmdata)
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            ! Map
+            face(i)%line%segID = mpg(face(i)%line%segID)
+
+            ! Check
+            keepind = face(i)%line%segID /= 0
+            if (size(keepind) == 0) then 
+                print *, 'face: ', i 
+                call gdErrorHandler('RemoveGGTMSegmentLogical: face ' // & 
+                    'had all segments deleted, unexpected')
+            end if 
+
+            ! Delete any zero segments and reinitialize
+            face(i)%line%segID = pack(face(i)%line%segID, keepind)
+            call face(i)%line%UpdateLineData(ggtmdata)
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                ! Map
+                cell(i)%lines(j)%segID = mpg(cell(i)%lines(j)%segID)
+
+                ! Check
+                keepind = cell(i)%lines(j)%segID /= 0
+                if (size(keepind) == 0) then 
+                    print *, 'cell: ', i, 'line: ', j 
+                    call gdErrorHandler('RemoveGGTMSegmentLogical: cell line ' // & 
+                        'had all segments deleted, unexpected')
+                end if 
+
+                ! Delete any zero segments and reinitialize
+                cell(i)%lines(j)%segID = pack(cell(i)%lines(j)%segID, keepind)
+                call cell(i)%lines(j)%UpdateLineData(ggtmdata)
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                ! hfline
+                !-------
+                ! Map
+                cell(i)%tubes(j)%hfline%segID = mpg(cell(i)%tubes(j)%hfline%segID)
+
+                ! Check
+                keepind = cell(i)%tubes(j)%hfline%segID /= 0
+                if (size(keepind) == 0) then 
+                    print *, 'cell: ', i, 'tube: ', j 
+                    call gdErrorHandler('RemoveGGTMSegmentLogical: cell tube hfline ' // & 
+                        'had all segments deleted, unexpected')
+                end if 
+
+                ! Delete any zero segments and reinitialize
+                cell(i)%tubes(j)%hfline%segID = pack(cell(i)%tubes(j)%hfline%segID, keepind)
+                call cell(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
+
+                ! lfline
+                !-------
+                ! Map
+                cell(i)%tubes(j)%lfline%segID = mpg(cell(i)%tubes(j)%lfline%segID)
+
+                ! Check
+                keepind = cell(i)%tubes(j)%lfline%segID /= 0
+                if (size(keepind) == 0) then 
+                    print *, 'cell: ', i, 'tube: ', j 
+                    call gdErrorHandler('RemoveGGTMSegmentLogical: cell tube lfline ' // & 
+                        'had all segments deleted, unexpected')
+                end if 
+
+                ! Delete any zero segments and reinitialize
+                cell(i)%tubes(j)%lfline%segID = pack(cell(i)%tubes(j)%lfline%segID, keepind)
+                call cell(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
+            end do 
+        end do 
+
+        ! Delete
+        !=======
+        allocate(tempseg(count(isused)))
+        tempseg = pack(ggtmdata%seg, isused)
+        ggtmdata%seg = tempseg
+        ggtmdata%nseg = size(tempseg)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        ! Optional output arguments
+        !==========================
+        if (present(mapping)) then 
+            mapping = mpg
+        end if 
+
+    end subroutine
+
+    ! Replacement
     subroutine ReplaceGGTMSegment(ggtmdata, origsegID, newsegID)
 
         ! Description
@@ -10105,6 +10347,12 @@ module ggmod_gridgeneration2D
         end if 
 
         if (size(dlcv) > 1) then
+            ! Hedge for single vertex cases
+            if (size(dlcv) == 2 .and. vertID(1) == vertID(2)) then 
+                ! Vertex detected
+                segment%vert = vertID 
+                return 
+            end if 
             if (any(abs(dlcv(2:) - dlcv(1:size(dlcv)-1)) < disttol)) then 
                 print *, 'AddVerticesGGTMSegment: coinciding vertices'
             end if
