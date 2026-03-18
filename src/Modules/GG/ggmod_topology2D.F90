@@ -8101,12 +8101,15 @@ module ggmod_topology2D
                     ! Need to take second vertex
                     x2 = face%x(tf2)%Get(2)
                     y2 = face%y(tf2)%Get(2)
-                elseif  (face%vert(tf1, 2) == mergevert(i)) then 
+                elseif  (face%vert(tf2, 2) == mergevert(i)) then 
                     ! Need to take N-1 vertex
                     x2 = face%x(tf2)%Get(face%x(tf2)%Size()-1)
                     y2 = face%y(tf2)%Get(face%y(tf2)%Size()-1)
                 else
                     ! Unexpected
+                    print *, 'face vertices: ', face%vert(tf2, 1), face%vert(tf2, 2)
+                    print *, 'face vertices: ', face%vert(tf1, 1), face%vert(tf1, 2)
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
                     call gdErrorHandler('CollapseTMSeparatrixTubeTA: ' // &
                         'could not find x-point in face that is expected ' // & 
                         'to have x-point')
@@ -16547,13 +16550,29 @@ module ggmod_topology2D
             
             ! Adjust dlcrad
             dlcradf = 0.0_R8 ! Rebuild
-            do j = 2, size(psif)
-                if ((psif(j) < psimin) .or. psif(j) > psimax) then 
-                    dlcradf(j) = dlcradf(j-1)
-                else
-                    dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
-                end if 
-            end do  
+            where (psif < psimin) psif = psimin
+            where (psif > psimax) psif = psimax 
+            if (psif(1) < psif(size(psif))) then 
+                ! Psi is ascending, monotonize
+                do j = 2, size(psif)
+                    if ((psif(j) <= psif(j-1))) then 
+                        psif(j) = psif(j-1)
+                        dlcradf(j) = dlcradf(j-1)
+                    else
+                        dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
+                    end if 
+                end do  
+            else
+                ! Psi is descending, monotonize
+                do j = 2, size(psif)
+                    if ((psif(j) >= psif(j-1))) then 
+                        psif(j) = psif(j-1)
+                        dlcradf(j) = dlcradf(j-1)
+                    else
+                        dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
+                    end if 
+                end do  
+            end if
 
             ! Compute radial length
             thislrad = dlcradf(size(dlcradf))
