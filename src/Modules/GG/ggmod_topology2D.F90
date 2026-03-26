@@ -543,6 +543,20 @@ module ggmod_topology2D
             end if 
         end do 
 
+        ! Set type 2 tangency points with nearly identical values to be the same value
+        do i = 1, topomesh%vert%ntot-1
+            if (topomesh%vert%type(i) == TMvertextp2ID) then 
+                do j = i+1, topomesh%vert%ntot 
+                    if (topomesh%vert%type(j) == TMvertextp2ID) then 
+                        if (abs(topomesh%vert%fval(i)-topomesh%vert%fval(j)) < options%ffieldtol) then 
+                            topomesh%vert%fval(j) = topomesh%vert%fval(i)
+                            topomesh%vert%fsID(j) = topomesh%vert%fsID(i)
+                        end if 
+                    end if 
+                end do 
+            end if 
+        end do 
+
         ! Compute necessary contours
         !===========================
         ! Add contours and intersections
@@ -8101,12 +8115,15 @@ module ggmod_topology2D
                     ! Need to take second vertex
                     x2 = face%x(tf2)%Get(2)
                     y2 = face%y(tf2)%Get(2)
-                elseif  (face%vert(tf1, 2) == mergevert(i)) then 
+                elseif  (face%vert(tf2, 2) == mergevert(i)) then 
                     ! Need to take N-1 vertex
                     x2 = face%x(tf2)%Get(face%x(tf2)%Size()-1)
                     y2 = face%y(tf2)%Get(face%y(tf2)%Size()-1)
                 else
                     ! Unexpected
+                    print *, 'face vertices: ', face%vert(tf2, 1), face%vert(tf2, 2)
+                    print *, 'face vertices: ', face%vert(tf1, 1), face%vert(tf1, 2)
+                    call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
                     call gdErrorHandler('CollapseTMSeparatrixTubeTA: ' // &
                         'could not find x-point in face that is expected ' // & 
                         'to have x-point')
@@ -12990,7 +13007,7 @@ module ggmod_topology2D
         ! Auxiliary 
         integer(I8)                             :: tf, startface, & 
             turndirection, tfv(1:2), tvind, tv, startvert, &
-            starttvind, nf, nfv(1:2)
+            starttvind, nf, nfv(1:2), fu
         integer(I8), allocatable, dimension(:)  :: fc, disccellvert, &
             nfvfn, tcf, tcv, faceneig1, faceneig2, faceneig
 
@@ -13197,6 +13214,17 @@ module ggmod_topology2D
                     if (fc(nf) <= 0) then 
                         print *, 'vertex: ', tv
                         call WriteTopologicalMesh(topomesh, 'topomesh_error', .false.)
+                        open (action='write', file='./output/cell_error.dat', newunit=fu, &
+                            status='unknown')
+                        write (fu, *) 'cells that have been constructed. ' // & 
+                            'per cell, each row has: vertices, face, face type'
+                        do i = 1, size(cellvert)
+                            write(fu, *) 'cell: ', i
+                            write(fu, *) cellvert(i)%Get()
+                            write(fu, *) cellface(i)%Get()
+                            write(fu, *) topomesh%face%type(cellface(i)%Get())
+                        end do 
+                        close(fu)
                         call gdErrorHandler('AddTopologicalMeshCells: ' // & 
                             'next face is forced by turning direction ' // & 
                             'but is not available')
@@ -13360,6 +13388,15 @@ module ggmod_topology2D
                                 hasturned2(startface, 2) = .true.
                             else
                                 hasturned2(startface, 1) = .true.
+                            end if
+                            
+                            ! Remove the turn direction from the next face (otherwise this is skipped...)
+                            if (face%vert(tf, 1) == tv) then 
+                                hasturned1(tf, 1) = .true. 
+                                hasturned2(tf, 2) = .true. 
+                            else 
+                                hasturned1(tf, 2) = .true. 
+                                hasturned2(tf, 1) = .true. 
                             end if 
                             
                             ! Is the next face the start face? If so, exit
@@ -13413,6 +13450,15 @@ module ggmod_topology2D
                                 hasturned1(startface, 2) = .true.
                             else
                                 hasturned1(startface, 1) = .true.
+                            end if 
+
+                            ! Remove the turn direction from the next face (otherwise this is skipped...)
+                            if (face%vert(tf, 1) == tv) then 
+                                hasturned1(tf, 2) = .true. 
+                                hasturned2(tf, 1) = .true. 
+                            else 
+                                hasturned1(tf, 1) = .true. 
+                                hasturned2(tf, 2) = .true. 
                             end if 
                             
                             ! Is the next face the start face? If so, exit
@@ -16547,13 +16593,29 @@ module ggmod_topology2D
             
             ! Adjust dlcrad
             dlcradf = 0.0_R8 ! Rebuild
-            do j = 2, size(psif)
-                if ((psif(j) < psimin) .or. psif(j) > psimax) then 
-                    dlcradf(j) = dlcradf(j-1)
-                else
-                    dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
-                end if 
-            end do  
+            where (psif < psimin) psif = psimin
+            where (psif > psimax) psif = psimax 
+            if (psif(1) < psif(size(psif))) then 
+                ! Psi is ascending, monotonize
+                do j = 2, size(psif)
+                    if ((psif(j) <= psif(j-1))) then 
+                        psif(j) = psif(j-1)
+                        dlcradf(j) = dlcradf(j-1)
+                    else
+                        dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
+                    end if 
+                end do  
+            else
+                ! Psi is descending, monotonize
+                do j = 2, size(psif)
+                    if ((psif(j) >= psif(j-1))) then 
+                        psif(j) = psif(j-1)
+                        dlcradf(j) = dlcradf(j-1)
+                    else
+                        dlcradf(j) = dlcradf(j-1) + dlradf(j-1)
+                    end if 
+                end do  
+            end if
 
             ! Compute radial length
             thislrad = dlcradf(size(dlcradf))
