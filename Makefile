@@ -183,11 +183,8 @@ $(BUILDDIR)/Modules_GA: $(MODULE_FILES_GA)
 $(BUILDDIR)/Modules_GG: $(MODULE_FILES_GG)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Modules_GG
-$(BUILDDIR)/Modules_B25: $(MODULE_FILES_B25)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
-	touch $(BUILDDIR)/Modules_B25
 $(BUILDDIR)/Modules: $(BUILDDIR)/Modules_goat $(BUILDDIR)/Modules_GD $(BUILDDIR)/Modules_GA\
-	$(BUILDDIR)/Modules_GG $(BUILDDIR)/Modules_B25
+	$(BUILDDIR)/Modules_GG 
 
 ## Auxiliary			: compile auxiliary routines
 $(BUILDDIR)/Auxiliary: $(AUXILIARY_FILES)
@@ -208,11 +205,6 @@ $(BUILDDIR)/SODrivers: $(SODRIVER_FILES)
 $(BUILDDIR)/Setup: $(SETUP_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Setup
-
-## IO_carre			: compile carre routines
-$(BUILDDIR)/IO_carre: $(CARRE_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
-	touch $(BUILDDIR)/IO_carre
 
 ## Numerics		 	: compile numerics routines
 $(BUILDDIR)/Numerics: $(NUMERICS_FILES)

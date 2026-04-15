@@ -4638,230 +4638,70 @@ module goatmod_types
         ! Loop variables
     
         ! Auxiliary variables 
-        real(R8), allocatable       :: R(:), Z(:), psi(:, :), psivec(:), &
-            valr(:)
+        real(R8), allocatable       :: R(:), Z(:), psi(:, :)
     
         integer(I8)                 :: nr, nz ! real number of points in r, z directions
-        integer(I8)                 :: n, k
-        integer(I8), allocatable    :: val(:)
+        integer(I8)                 :: nval 
+        integer(I8), allocatable, dimension(:)  :: vali 
         
         character(:), allocatable   :: thisline ! temporary variable for line
-        logical                     :: iseof = .false. 
+        logical                     :: iseof
     
         ! Read R-coordinates
         !===================
+        ! Initialize
+        iseof = .false. 
+
         ! Read until we encounter 'nr'
-        do while (.true.)
-            ! Read in the next line
-            call ReadSingleLine(filespecifier, thisline, iseof)
-    
-            ! Check if we reached the end of the file
-            if (iseof) then 
-                ! Throw error
-                call gdErrorHandler('Readrzpsi: could not find r-coordinates in rzpsi file')
-    
-                ! Exit the loop
-                exit 
-            end if 
-    
-            ! Check if we encounter the specified string
-            if (index(thisline, 'nr') .ne. 0) then 
-                ! Found, extract nr and break the while loop
-                call ReadIntegersFromString(thisline, val, n)
-    
-                ! Sanity check: only one value can be found
-                if (n .ne. 1) then 
-                    call gdErrorHandler('Readrzpsi: found nr, but could not extract value')
-                end if
-    
-                ! Set nr & exit
-                nr = val(1)
-                exit 
-            end if
-        end do
-    
-        ! Allocate
+        call ReadUntilFound(filespecifier, 'nr', iseof)
+        if (iseof) then 
+            ! Throw error
+            call gdErrorHandler('Readrzpsi: could not find r-coordinates in rzpsi file')
+        end if 
+
+        ! Read nr
+        backspace(filespecifier)
+        call ReadSingleLine(filespecifier, thisline, iseof)
+        call ReadIntegersFromString(thisline, vali, nval)
+        if (nval /= 1) then 
+            call gdErrorHandler('Readrzpsi: could not read number of r coordinates')
+        end if 
+        nr = vali(1)
+
+        ! Read r coordinates
         allocate(R(nr))
-    
-        ! Read the R-coordinates line by line 
-        k = 0
-        do while (.true.)
-            ! Read next line
-            call ReadSingleLine(filespecifier, thisline, iseof)
-    
-            ! Check if we reached the end of the file prematurely
-            if (iseof) then 
-                ! Throw error
-                call gdErrorHandler('Readrzpsi: could not find r-coordinates in rzpsi file')
-    
-                ! Exit the loop
-                exit 
-            end if 
-    
-            ! Extract reals
-            call ReadRealsFromString(thisline, valr, n)
-    
-            ! Check 
-            if ((k + n) > nr) then 
-                ! This shouldn't be happening, throw error
-                call gdErrorHandler('Readrzpsi: encountered more r-coordinate entries than given by nr')
-            end if 
-    
-            ! Add 
-            R(k+1:k+n) = valr 
-    
-            ! Update k
-            k = k + n
-    
-            ! Check exit conditions
-            if ( k == nr ) then 
-                ! Normal exit
-                exit
-            elseif (index(thisline, 'z') .ne. 0) then 
-                ! Abnormal exit
-                call gdErrorHandler('Readrzpsi: encountered z-coordinates prematurely, probably less r-coordinate entries than nr')
-            end if 
-        end do 
+        R = 0.0_R8
+        call ReadArray(filespecifier, nr, R)
     
         ! Read Z-coordinates
         !===================
-        ! Read until we encounter 'nz'
-        do while (.true.)
-            ! Read in the next line
-            call ReadSingleLine(filespecifier, thisline, iseof)
-    
-            ! Check if we reached the end of the file
-            if (iseof) then 
-                ! Throw error
-                call gdErrorHandler('Readrzpsi: could not find r-coordinates in rzpsi file')
-    
-                ! Exit the loop
-                exit 
-            end if 
-    
-            ! Check if we encounter the specified string
-            if (index(thisline, 'nz') .ne. 0) then 
-                ! Found, extract nz and break the while loop
-                call ReadIntegersFromString(thisline, val, n)
-    
-                ! Sanity check: only one value can be found
-                if (n .ne. 1) then 
-                    call gdErrorHandler('Readrzpsi: found nz, but could not extract value')
-                end if
-    
-                ! Set nz & exit
-                nz = val(1)
-                exit 
-            end if
-        end do
-    
-        ! Allocate
+        ! Read until we encounter 'nr'
+        call ReadUntilFound(filespecifier, 'nz', iseof)
+        if (iseof) then 
+            ! Throw error
+            call gdErrorHandler('Readrzpsi: could not find z-coordinates in rzpsi file')
+        end if 
+
+        ! Read nz
+        backspace(filespecifier)
+        call ReadSingleLine(filespecifier, thisline, iseof)
+        call ReadIntegersFromString(thisline, vali, nval)
+        if (nval /= 1) then 
+            call gdErrorHandler('Readrzpsi: could not read number of z coordinates')
+        end if 
+        nz = vali(1)
+
+        ! Read z coordinates
         allocate(Z(nz))
-    
-        ! Read the Z-coordinates line by line 
-        k = 0
-        do while (.true.)
-            ! Read next line
-            call ReadSingleLine(filespecifier, thisline, iseof)
-    
-            ! Check if we reached the end of the file prematurely
-            if (iseof) then 
-                ! Throw error
-                call gdErrorHandler('Readrzpsi: could not find z-coordinates in rzpsi file')
-    
-                ! Exit the loop
-                exit 
-            end if 
-    
-            ! Extract reals
-            call ReadRealsFromString(thisline, valr, n)
-    
-            ! Check 
-            if ((k + n) > nz) then 
-                ! This shouldn't be happening, throw error
-                call gdErrorHandler('Readrzpsi: encountered more z-coordinate entries than given by nz')
-            end if 
-    
-            ! Add 
-            Z(k+1:k+n) = valr 
-    
-            ! Update k
-            k = k + n
-    
-            ! Check exit conditions
-            if ( k == nz ) then 
-                exit
-            elseif (index(thisline, 'psi') .ne. 0) then 
-                ! Abnormal exit
-                call gdErrorHandler('Readrzpsi: encountered psi values prematurely, probably less z-coordinate entries than nz')
-            end if 
-        end do 
-    
+        Z = 0.0_R8
+        call ReadArray(filespecifier, nz, Z)
+
         ! Read Psi values
         !================
-        ! Read until we encounter 'psi'
-        do while (.true.)
-            ! Read in the next line
-            call ReadSingleLine(filespecifier, thisline, iseof)
-    
-            ! Check if we reached the end of the file
-            if (iseof) then 
-                ! Throw error
-                call gdErrorHandler('Readrzpsi: could not find psi values in rzpsi file')
-    
-                ! Exit the loop
-                exit 
-            end if 
-    
-            ! Check if we encounter the specified string
-            if (index(thisline, 'psi') .ne. 0) then 
-                ! Found, exit while loop
-                exit 
-            end if
-        end do
-    
         ! Allocate
         allocate(psi(nr, nz))
-        allocate(psivec(nr*nz))
-    
-        ! Read the psi values line by line 
-        k = 0
-        do while (.true.)
-            ! Read next line
-            call ReadSingleLine(filespecifier, thisline, iseof)
-    
-            ! Check if we reached the end of the file prematurely
-            if (iseof) then 
-                ! Throw error
-                call gdErrorHandler('Readrzpsi: could not find psi values in rzpsi file')
-    
-                ! Exit the loop
-                exit 
-            end if 
-    
-            ! Extract reals
-            call ReadRealsFromString(thisline, valr, n)
-    
-            ! Check 
-            if ((k + n) > nr*nz) then 
-                ! This shouldn't be happening, throw error
-                call gdErrorHandler('Readrzpsi: encountered more psi value entries than given by nr*nz')
-            end if 
-    
-            ! Add 
-            psivec(k+1:k+n) = valr 
-    
-            ! Update k
-            k = k + n
-    
-            ! Check exit conditions
-            if ( k == nr*nz ) then 
-                exit
-            end if 
-        end do 
-    
-        ! Reshape psivec into psi
-        psi = reshape(psivec, (/nr, nz/))
+        psi = 0.0_R8
+        call ReadArray(filespecifier, nr*nz, psi, 'psi')
     
         ! Add to magnetic field
         !======================
@@ -4882,9 +4722,7 @@ module goatmod_types
 
         ! Description
         !============
-        ! Read in the equ data and add those to the magnetic field. This 
-        ! routine serves as a wrapper for the CARRE reading files rdeqdg.F
-        ! and rdeqlh.F. 
+        ! Read in the equ data and add those to the magnetic field. 
     
         ! Notes
         !======
@@ -4906,25 +4744,113 @@ module goatmod_types
         ! Auxiliary variables 
         real(R8)  , allocatable     :: R(:), Z(:) ! coordinates of magnetic field grid
         real(R8)                    :: btf, rtf ! toroidal field strength and radius
-        integer(I8)                 :: returncode ! return code from rdeqdg
+        real(R8)                    :: psib ! psi at boundary (?)
         integer(I8)                 :: nr, nz ! real number of points in r, z directions
-        integer(I8)                 :: maxnr, maxnz ! maximal number of points in r, z direction
+        integer(I8)                 :: nval
+        integer(I8), allocatable, dimension(:)  :: vali 
+        real(R8), allocatable, dimension(:)     :: valr
         real(R8), allocatable       :: pfm(:, :) ! temporary psi value array
-    
-        ! Data
-        data maxnr /4000/
-        data maxnz /4000/
+        logical                     :: reachedeof
+        integer(I8)                 :: ind
+        character(:), allocatable   :: thisline, valname
     
         ! Main program
         !=============
-        ! Allocate
-        allocate(pfm(maxnr, maxnz))
-        allocate(R(maxnr))
-        allocate(Z(maxnz))
-    
-        ! Call file reader rdeqdg
-        call rdeqdg(filespecifier, maxnr, maxnz, returncode, nr, nz, btf, rtf, &
-                R, Z, pfm)
+        ! Find start position for reading (i.e. jm = ...)
+        reachedeof = .false. 
+        do while (.true.)
+            ! Read line
+            call ReadSingleLine(filespecifier, thisline, reachedeof)
+
+            ! Check for eof
+            if (reachedeof) then 
+                exit 
+            end if 
+
+            ! Check if it's a comment line
+            ind = index(thisline, ':=')
+            if (ind /= 0) then 
+                ! Comment line, cycle
+                cycle 
+            end if 
+
+            ! Check if it's not a comment line
+            ind = index(thisline, '=')
+            if (ind == 0) then 
+                ! Comment or empty line, cycle
+                cycle 
+            end if 
+
+            ! If we got here, we're at the start. Exit the loop
+            backspace(filespecifier)
+            exit 
+        end do 
+
+        ! Check
+        if (reachedeof) then 
+            call gdErrorHandler('Readequ: could not read in header, reached EOF')
+        end if 
+
+        ! Read from header
+        valname = 'jm'
+        call ReadSingleLine(filespecifier, thisline, reachedeof)
+        if (index(thisline, valname) == 0) call gdErrorHandler(&
+            'Readequ: ' // valname // ' not at expected location')
+        call ReadIntegersFromString(thisline, vali, nval)
+        if (nval /= 1) call gdErrorHandler(&
+            'Readequ: could not read in value of ' // valname)
+        nr = vali(1)
+
+        valname = 'km'
+        call ReadSingleLine(filespecifier, thisline, reachedeof)
+        if (index(thisline, valname) == 0) call gdErrorHandler(&
+            'Readequ: ' // valname // ' not at expected location')
+        call ReadIntegersFromString(thisline, vali, nval)
+        if (nval /= 1) call gdErrorHandler(&
+            'Readequ: could not read in value of ' // valname)
+        nz = vali(1)
+
+        valname = 'psib'
+        call ReadSingleLine(filespecifier, thisline, reachedeof)
+        if (index(thisline, valname) == 0) call gdErrorHandler(&
+            'Readequ: ' // valname // ' not at expected location')
+        call ReadRealsFromString(thisline, valr, nval)
+        if (nval /= 1) call gdErrorHandler(&
+            'Readequ: could not read in value of ' // valname)
+        psib = valr(1)
+
+        valname = 'btf'
+        call ReadSingleLine(filespecifier, thisline, reachedeof)
+        if (index(thisline, valname) == 0) call gdErrorHandler(&
+            'Readequ: ' // valname // ' not at expected location')
+        call ReadRealsFromString(thisline, valr, nval)
+        if (nval /= 1) call gdErrorHandler(&
+            'Readequ: could not read in value of ' // valname)
+        btf = valr(1)
+
+        valname = 'rtf'
+        call ReadSingleLine(filespecifier, thisline, reachedeof)
+        if (index(thisline, valname) == 0) call gdErrorHandler(&
+            'Readequ: ' // valname // ' not at expected location')
+        call ReadRealsFromString(thisline, valr, nval)
+        if (nval /= 1) call gdErrorHandler(&
+            'Readequ: could not read in value of ' // valname)
+        rtf = valr(1)
+
+        ! Initialize
+        allocate(R(nr), Z(nz), pfm(nr, nz))
+        R = 0.0_R8 
+        Z = 0.0_R8 
+        pfm = 0.0_R8
+
+        ! Read r values
+        call ReadArray(filespecifier, nr, R, 'r(1:jm)')
+
+        ! Read z values
+        call ReadArray(filespecifier, nz, Z, 'z(1:km)')
+
+        ! Read psi values
+        call ReadArray(filespecifier, nr*nz, pfm, 'psi(j,k)')
     
         ! Allocate the magnetic field 
         magneticField%nR = nr
