@@ -278,17 +278,8 @@ AUXILIARY_FILES =  src/Auxiliary/mod_structured2Dgridding.F90 \
     src/Auxiliary/mod_streamlinetracing2D.F90 \
     src/Auxiliary/Graphs/mod_graph.F90
 
-## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
-B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
-
 ## CARRE_FILES			: carre generation filenames (.F90, .F) - unsequenced
 CARRE_FILES = $(wildcard src/IO/CARRE/*.F90) $(wildcard src/IO/CARRE/*.F)
-
-## INPUT_FILES			: input generation filenames (.F90) - unsequenced
-INPUT_FILES = $(wildcard src/IO/Input/*.F90)
-
-## OUTPUT_FILES			: output generation filenames (.F90) - unsequenced
-OUTPUT_FILES = $(wildcard src/IO/Output/*.F90)
 
 ## SETUP_FILES			: setup file generation names (.F90) - unsequenced
 SETUP_FILES = $(wildcard src/Setup/*.F90)
@@ -325,7 +316,7 @@ SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
 ## % Targets
 ## %========
 ## GOAT_TARGETS             : Targets to be run for the full goat
-GOAT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+GOAT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
     IO_carre Drivers 
 
 ## TEST_TARGETS             : Targets to be run for goat tests

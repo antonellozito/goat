@@ -67,7 +67,6 @@ module goatmod_userinput
         ! - write_final: write final output
         ! - write_traduitb2us: write unstructured traduit file
         ! - write_b2agdat:  write final b2ag.dat file for use in b2ag
-        ! - write_Xpointdata: write out X-point data in traduit file
         ! - write_OMPdata: write OMP data in traduit file
         ! - write_topologicaldata:   write out X-, O-, and strike point
         ! information, and other topological data. 
@@ -123,7 +122,6 @@ module goatmod_userinput
         logical                     :: write_final 
         logical                     :: write_traduitb2us
         logical                     :: write_b2agdat
-        logical                     :: write_Xpointdata 
         logical                     :: write_OMPdata
         logical                     :: write_topologicaldata
 
@@ -1093,7 +1091,6 @@ module goatmod_userinput
         options%write_final         = .true. 
         options%write_traduitb2us   = .true.
         options%write_b2agdat       = .true. 
-        options%write_Xpointdata    = .false. 
         options%write_OMPdata       = .false. 
         options%write_topologicaldata = .false.
 
@@ -1693,8 +1690,6 @@ module goatmod_userinput
         call ExtractOptionValueLogical0D(fid, field, options%write_traduitb2us)
         field = 'goat.write_b2agdat'
         call ExtractOptionValueLogical0D(fid, field, options%write_b2agdat)
-        field = 'goat.write_Xpointdata'
-        call ExtractOptionValueLogical0D(fid, field, options%write_Xpointdata)
         field = 'goat.write_OMPdata'
         call ExtractOptionValueLogical0D(fid, field, options%write_OMPdata)
         field = 'goat.write_topologicaldata'
@@ -2806,6 +2801,5 @@ module goatmod_userinput
         close(unit=fid)
 
     end subroutine
-
 
 end module goatmod_userinput

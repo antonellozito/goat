@@ -85,7 +85,6 @@ module mod_inputfileparser
     !============
     use mod_precision
     use mod_specialchars 
-    use mod_std_formatspecs, only: Rfm
     use mod_readwrite 
     use mod_errorhandler
 
@@ -1995,8 +1994,6 @@ module mod_inputfileparser
 
 
     end subroutine
-    
-
     !------------------------------------------------------------------!
     !                       Basic string handling                      !
     !------------------------------------------------------------------!
@@ -2337,6 +2334,5 @@ module mod_inputfileparser
         
 
     end subroutine
-
 
 end module

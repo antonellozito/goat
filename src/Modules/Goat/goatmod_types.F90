@@ -931,7 +931,7 @@ module goatmod_types
         ! call cfverr(filespec,b2fgmtryversion)
     
         ! Primary array dimensions
-        call cfruin (filespec,6,idum,'nCi,nFc,nVx,nCg,nFs,nFt')
+        call ReadArray(filespec, 6, idum, 'nCi,nFc,nVx,nCg,nFs,nFt')
         nc = idum(0) ! note: only reading in actual cells, no guard cells
         nf = idum(1)
         nv = idum(2)
@@ -944,7 +944,7 @@ module goatmod_types
         grid%data%fluxdata%nFt  = idum(5)
     
         ! Secondary array dimensions
-        call cfruin (filespec,5,idum,'nCmxVx,nCmxFc,nFmxCv,nVmxCv,nVmxFc')
+        call ReadArray (filespec,5,idum,'nCmxVx,nCmxFc,nFmxCv,nVmxCv,nVmxFc')
     
         ! Add to grid
         grid%cell%nvert = idum(0)
@@ -963,10 +963,10 @@ module goatmod_types
         if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
 
         ! Read data for structured grid remapping (to be deleted in future)
-        call cfruin (filespec,1,idum2,'isClassicalGrid') 
+        call ReadArray (filespec,1,idum2,'isClassicalGrid') 
         grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4) ! cast to I4 type
         if (grid%data%sglegacy%isClassicalGrid == 1) then 
-            call cfruin (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
+            call ReadArray (filespec,3,idum,'nx,ny,nncut') ! this seems to be wrongly formatted for now - to be checked in the future
             grid%data%sglegacy%nx = idum(0)
             grid%data%sglegacy%ny = idum(1)
         end if
@@ -974,11 +974,11 @@ module goatmod_types
         ! Read topological data
         if (readTopologicalData) then 
             ! Read topological mesh flag
-            call cfruin(filespec, 1, idum, 'topoflag')
+            call ReadArray(filespec, 1, idum, 'topoflag')
             grid%data%topoflag = idum(0)
     
             ! Read number of topological points
-            call cfruin(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
+            call ReadArray(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
             grid%data%nxp = idum(0)
             grid%data%nop = idum(1)
             grid%data%nsp = idum(2)
@@ -1035,7 +1035,7 @@ module goatmod_types
             end do
     
             ! Read divertor face data
-            call cfruin(filespec, grid%data%ndivFc, grid%data%divFc, 'divFc')
+            call ReadArray(filespec, grid%data%ndivFc, grid%data%divFc, 'divFc')
     
         else 
             ! Initialize to zero
@@ -1086,7 +1086,7 @@ module goatmod_types
         else 
             ! Found, read in coordinates (assumed two)
             backspace(filespec)
-            call cfrure(filespec, 2, grid%data%OMPr, 'OMPr')
+            call ReadArray(filespec, 2, grid%data%OMPr, 'OMPr')
         end if 
         call ReadUntilFound(filespec, 'OMPz', reachedeof)
         if (reachedeof) then 
@@ -1096,7 +1096,7 @@ module goatmod_types
         else 
             ! Found, read in coordinates (assumed two)
             backspace(filespec)
-            call cfrure(filespec, 2, grid%data%OMPz, 'OMPz')
+            call ReadArray(filespec, 2, grid%data%OMPz, 'OMPz')
         end if 
     
         ! IMP
@@ -1108,7 +1108,7 @@ module goatmod_types
         else 
             ! Found, read in coordinates (assumed two)
             backspace(filespec)
-            call cfrure(filespec, 2, grid%data%IMPr, 'IMPr')
+            call ReadArray(filespec, 2, grid%data%IMPr, 'IMPr')
         end if 
         call ReadUntilFound(filespec, 'IMPz', reachedeof)
         if (reachedeof) then 
@@ -1118,7 +1118,7 @@ module goatmod_types
         else 
             ! Found, read in coordinates (assumed two)
             backspace(filespec)
-            call cfrure(filespec, 2, grid%data%IMPz, 'IMPz')
+            call ReadArray(filespec, 2, grid%data%IMPz, 'IMPz')
         end if 
     
         ! Rewind and reset to expected location
@@ -1133,7 +1133,7 @@ module goatmod_types
     
         ! Vertex data
         !------------
-        ! Here we simply loop ourselves, as cfruin etc
+        ! Here we simply loop ourselves, as ReadArray etc
         ! do not seem to be capable to load in this data (?)
         allocate(vdata(nv, 6), vlist(nv))
         
@@ -1186,8 +1186,8 @@ module goatmod_types
         grid%cell%bt(clist)                = cdata(:, 5)
     
         ! Cell vertices and faces
-        call cfruin (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
-        call cfruin (filespec, grid%cell%nface, grid%cell%face,  'cvFc')
+        call ReadArray (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
+        call ReadArray (filespec, grid%cell%nface, grid%cell%face,  'cvFc')
     
         ! Faces
         !------
@@ -1238,8 +1238,8 @@ module goatmod_types
         
         ! Read ftCv, ftFc
         allocate(ftCvdum(nftCv), ftFcdum(nftFc))
-        call cfruin (filespec, nftCv, ftCvdum, 'ftCv')
-        call cfruin (filespec, nftFc, ftFcdum, 'ftFc')
+        call ReadArray (filespec, nftCv, ftCvdum, 'ftCv')
+        call ReadArray (filespec, nftFc, ftFcdum, 'ftFc')
         
     
         ! Add to grid
@@ -1275,7 +1275,7 @@ module goatmod_types
     
         ! Read fsFc
         allocate(fsFcdum(nfsFc))
-        call cfruin (filespec, nfsFc, fsFcdum ,  'fsFc')
+        call ReadArray (filespec, nfsFc, fsFcdum ,  'fsFc')
     
         ! Add to grid
         grid%data%fluxdata%fluxsurfacefaces(1:nfsFc) = fsFcdum
@@ -1335,7 +1335,7 @@ module goatmod_types
         character(*), intent(in)    :: filepath
     
         ! Auxiliary
-        logical                     :: reachedeof
+        logical                     :: reachedeof, readTopologicalData
         integer(I8)                 :: idum(0:9), idum2(1), filespec   
         integer(I8)                 :: nc,nf,nv ! total number of cells, faces, vertices
     
@@ -1389,9 +1389,16 @@ module goatmod_types
         if (reachedeof) then 
             call gdErrorHandler('ReadB2fgmtryUS: reached EOF prematurely')
         end if 
+
+        ! Check the version to determine what to read in 
+        readTopologicalData = .false. 
+        if (chardummy(8:17) >= '03.002.001') then 
+            ! Topological data should be present
+            readTopologicalData = .true.
+        end if 
     
         ! Primary array dimensions
-        call cfruin (filespec,7,idum,'nCi,nCg,nCv,nFc,nVx,nFs,nFt')
+        call ReadArray (filespec,7,idum,'nCi,nCg,nCv,nFc,nVx,nFs,nFt')
         ngc = int(idum(1), I8)
         nc = int(idum(2), I8) ! make sure to cast to correct type
         nf = int(idum(3), I8)
@@ -1405,7 +1412,7 @@ module goatmod_types
         grid%data%fluxdata%nFt  = idum(6)
     
         ! Secondary array dimensions
-        call cfruin (filespec,5,idum,'nCmxVx,nCmxFc,nVmxCv,nVmxFc,nCmxNv')
+        call ReadArray (filespec,5,idum,'nCmxVx,nCmxFc,nVmxCv,nVmxFc,nCmxNv')
     
         ! Add to grid
         grid%cell%nvert = idum(0)
@@ -1416,12 +1423,15 @@ module goatmod_types
         ! Allocate grid
         call AllocateGrid(grid)
 
-        ! Allocate
-        allocate(grid%data%xpointID(0), grid%data%opointID(0), &
-                grid%data%spointID(0), grid%data%isprimaryxp(0), &
-                grid%data%divFcP(0, 2), grid%data%divFc(0), &
-                grid%data%spointdivID(0), grid%data%tpointdivID(0), &
-                grid%data%sepID(0))
+        ! Initialize topological data
+        if (allocated(grid%data%isprimaryxp)) deallocate(grid%data%isprimaryxp)
+        if (allocated(grid%data%xpointID)) deallocate(grid%data%xpointID)
+        if (allocated(grid%data%opointID)) deallocate(grid%data%opointID)
+        if (allocated(grid%data%spointID)) deallocate(grid%data%spointID)
+        if (allocated(grid%data%divFcP)) deallocate(grid%data%divFcP)
+        if (allocated(grid%data%divFc)) deallocate(grid%data%divFc)
+        if (allocated(grid%data%spointdivID)) deallocate(grid%data%spointdivID)
+        if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
 
         ! Check
         if (.not. allocated(grid%vert%face)) then 
@@ -1444,41 +1454,78 @@ module goatmod_types
         allocate(fcQalf(nf, 2))
     
         ! Read data for structured grid remapping (to be deleted in future)
-        call cfruin (filespec,1,idum2,'isClassicalGrid')
+        call ReadArray (filespec,1,idum2,'isClassicalGrid')
         grid%data%sglegacy%isClassicalGrid = int(idum2(1), I4)
-        call cfruin (filespec,3,idum,'nx,ny,nncut')
+        call ReadArray (filespec,3,idum,'nx,ny,nncut')
         grid%data%sglegacy%nx       = idum(0)
         grid%data%sglegacy%ny       = idum(1)
         grid%data%sglegacy%nncut = idum(2)
+
+        ! Read topological data
+        if (readTopologicalData) then 
+            ! Read topological mesh flag
+            call ReadArray(filespec, 1, idum, 'topoflag')
+            grid%data%topoflag = idum(0)
+    
+            ! Read number of topological points
+            call ReadArray(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
+            grid%data%nxp = idum(0)
+            grid%data%nop = idum(1)
+            grid%data%nsp = idum(2)
+            grid%data%ntp = idum(3)
+            grid%data%ndiv = idum(4)
+            grid%data%ndivFc = idum(5)
+            grid%data%nsep = 0
+    
+        else 
+            ! Initialize to zero
+            grid%data%topoflag = 0
+            grid%data%nxp = 0
+            grid%data%nop = 0
+            grid%data%nsp = 0
+            grid%data%ntp = 0
+            grid%data%ndiv = 0
+            grid%data%ndivFc = 0
+            grid%data%nsep = 0
+    
+        end if 
+
+        ! Allocate
+        allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
+            grid%data%spointID(idum(2)), grid%data%tpointID(idum(3)), &
+            grid%data%isprimaryxp(idum(0)), &
+            grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
+            grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
+            grid%data%spointxpID(grid%data%nsp), grid%data%sepID(grid%data%nsep))
         
         ! Read data that is not used
-        call cfruch (filespec,120,chardummy,'label')
-        call cfruin (filespec,1,idum, 'isymm')
+        call ReadSingleLine(filespec, chardummy2, reachedeof)
+        call ReadArray (filespec,1,idum, 'isymm')
     
         ! Add grid mapping data
         allocate(fdummy2(nf, 2))
-        call cfruin (filespec, nc*2,    grid%cell%faceP, 'cvFcP')
-        call cfruin (filespec, grid%cell%nface, grid%cell%face,  'cvFc')
-        call cfruin (filespec, nf*2,    fdummy2,  'fcCv')
-        call cfruin (filespec, nf*2,    grid%face%vert,  'fcVx')
-        call cfruin (filespec, nc*2,    grid%cell%vertP, 'cvVxP')
-        call cfruin (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
-        call cfruin (filespec, nv*2,     grid%vert%faceP, 'vxFcP')
-        call cfruin (filespec, grid%vert%nface,  grid%vert%face,  'vxFc')
-        call cfruin (filespec, nv*2,     grid%vert%cellP, 'vxCvP')
-        call cfruin (filespec, grid%vert%ncell,  grid%vert%cell,  'vxCv')
-        call cfruin (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubecellsP, 'ftCvP')
-        call cfruin (filespec, nc,     grid%data%fluxdata%fluxtubecells,  'ftCv')
-        call cfruin (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubefacesP, 'ftFcP')
-        call cfruin (filespec, nf,     grid%data%fluxdata%fluxtubefaces,  'ftFc')
-        call cfruin (filespec, nc,     grid%cell%ft,  'cvFt')   
-        call cfruin (filespec, grid%data%fluxdata%nFs*2,   grid%data%fluxdata%fluxsurfacefacesP, 'fsFcP')
-        call cfruin (filespec, nf,     grid%data%fluxdata%fluxsurfacefaces,  'fsFc')
-        call cfruin (filespec, nf,     grid%face%reg, 'fcReg')
-        call cfruin (filespec, nc,     grid%cell%reg, 'cvReg')
-        call cfruin (filespec, grid%data%fluxdata%nFt,     grid%data%fluxdata%fluxtuberegID, 'ftReg')
-        call cfrure (filespec, grid%cell%nface,  facedummy,'intcellP') ! not used
-        call cfrure (filespec, grid%cell%nface,  facedummy,'intcellR') ! not used
+        call ReadArray (filespec, nc*2,    grid%cell%faceP, 'cvFcP')
+        call ReadArray (filespec, grid%cell%nface, grid%cell%face,  'cvFc')
+        call ReadArray (filespec, nf*2,    fdummy2,  'fcCv')
+        call ReadArray (filespec, nf*2,    grid%face%vert,  'fcVx')
+        call ReadArray (filespec, nc*2,    grid%cell%vertP, 'cvVxP')
+        call ReadArray (filespec, grid%cell%nvert, grid%cell%vert,  'cvVx')
+        call ReadArray (filespec, nv*2,     grid%vert%faceP, 'vxFcP')
+        call ReadArray (filespec, grid%vert%nface,  grid%vert%face,  'vxFc')
+        call ReadArray (filespec, nv*2,     grid%vert%cellP, 'vxCvP')
+        call ReadArray (filespec, grid%vert%ncell,  grid%vert%cell,  'vxCv')
+        call ReadArray (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubecellsP, 'ftCvP')
+        call ReadArray (filespec, nc,     grid%data%fluxdata%fluxtubecells,  'ftCv')
+        call ReadArray (filespec, grid%data%fluxdata%nFt*2,   grid%data%fluxdata%fluxtubefacesP, 'ftFcP')
+        call ReadArray (filespec, nf,     grid%data%fluxdata%fluxtubefaces,  'ftFc')
+        call ReadArray (filespec, nc,     grid%cell%ft,  'cvFt')   
+        call ReadArray (filespec, grid%data%fluxdata%nFs*2,   grid%data%fluxdata%fluxsurfacefacesP, 'fsFcP')
+        call ReadArray (filespec, nf,     grid%data%fluxdata%fluxsurfacefaces,  'fsFc')
+        call ReadArray (filespec, nf,     grid%face%reg, 'fcReg')
+        call ReadArray (filespec, nc,     grid%cell%reg, 'cvReg')
+        call ReadArray (filespec, grid%data%fluxdata%nFt,     grid%data%fluxdata%fluxtuberegID, 'ftReg')
+        call ReadArray (filespec, grid%cell%nface,  facedummy,'intcellP') ! not used
+        call ReadArray (filespec, grid%cell%nface,  facedummy,'intcellR') ! not used
         deallocate(fdummy2)
     
         ! Add additional data from underlying structured grid (to be removed)
@@ -1490,38 +1537,85 @@ module goatmod_types
         ! For now, put it into dummies
         allocate(n2dummy(n2))
         allocate(nxdummy(nx))
-        call cfruin (filespec, n2, n2dummy,  'imapCv')
-        call cfruin (filespec, n2, n2dummy, 'imapFcx')
-        call cfruin (filespec, n2, n2dummy, 'imapFcy')
-        call cfruin (filespec, n2, n2dummy,  'imapVx')
-        call cfruin (filespec, nx, nxdummy, 'icornVx')
+        if (grid%data%sglegacy%isClassicalGrid == 1) then 
+            call ReadArray (filespec, n2, n2dummy,  'imapCv')
+            call ReadArray (filespec, n2, n2dummy, 'imapFcx')
+            call ReadArray (filespec, n2, n2dummy, 'imapFcy')
+            call ReadArray (filespec, n2, n2dummy,  'imapVx')
+            call ReadArray (filespec, nx, nxdummy, 'icornVx')
+        end if 
     
         ! Read some labels, ignore
-        call cfruin (filespec, nf, grid%face%label,'fcLbl')
-        call cfruin (filespec, nc, cdummy,'cvLbl')
-        call cfruin (filespec, grid%data%fluxdata%nFt, ftdummy,'ftLbl')
+        call ReadArray (filespec, nf, grid%face%label,'fcLbl')
+        call ReadArray (filespec, nc, cdummy(:, 1),'cvLbl')
+        call ReadArray (filespec, grid%data%fluxdata%nFt, ftdummy,'ftLbl')
+
+        ! Read topological data
+        if (readTopologicalData) then 
+            ! Read X-point data
+            call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
+            do i = 1, grid%data%nxp  
+                ! Read 
+                read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp(i), &
+                    idum(0)
+            end do
+    
+            ! Read O-point data - not yet written in b2fgmtry
+            !call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
+            !do i = 1, grid%data%nop  
+            !    ! Read 
+            !    read(filespec, *) grid%data%opointID(i)
+            !end do
+    
+            ! Read strike point data
+            call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
+            do i = 1, grid%data%nsp  
+                ! Read 
+                read(filespec, *) grid%data%spointID(i), grid%data%spointxpID(i), &
+                    grid%data%spointdivID(i), idum(0)
+            end do
+    
+            ! Read tangency point data
+            call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
+            do i = 1, grid%data%ntp  
+                ! Read 
+                read(filespec, *) grid%data%tpointID(i), grid%data%tpointdivID(i), &
+                    idum(0)
+            end do
+    
+            ! Read divertor data
+            call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
+            do i = 1, grid%data%ndiv  
+                ! Read 
+                read(filespec, *) idum(0), grid%data%divFcP(i, 1), &
+                    grid%data%divFcP(i, 2)
+            end do
+    
+            ! Read divertor face data
+            call ReadArray(filespec, grid%data%ndivFc, grid%data%divFc, 'divFc')
+        end if 
     
         ! Add geometry data
         ! cell data - ignore all
-        call cfrure (filespec, nc*4, cdummyr(:,1:4),   'cvBb')
-        call cfrure (filespec, nc*3, cdummyr(:,1:3),   'cvEb')
-        call cfrure (filespec, nc,   cdummyr(:,1),    'cvX')
-        call cfrure (filespec, nc,   cdummyr(:,1),    'cvY')
-        call cfrure (filespec, nc,   cdummyr(:,1),   'cvSz')
-        call cfrure (filespec, nc,   cdummyr(:,1),   'cvHz')
-        call cfrure (filespec, nc,   cdummyr(:,1),   'cvHx') !WG temp!
-        call cfrure (filespec, nc*2, cdummyr(:,1:2), 'cvQgam')
-        call cfrure (filespec, nc,   cdummyr(:,1),  'cvVol')
+        call ReadArray (filespec, nc*4, cdummyr(:,1:4),   'cvBb')
+        call ReadArray (filespec, nc*3, cdummyr(:,1:3),   'cvEb')
+        call ReadArray (filespec, nc,   cdummyr(:,1),    'cvX')
+        call ReadArray (filespec, nc,   cdummyr(:,1),    'cvY')
+        call ReadArray (filespec, nc,   cdummyr(:,1),   'cvSz')
+        call ReadArray (filespec, nc,   cdummyr(:,1),   'cvHz')
+        call ReadArray (filespec, nc,   cdummyr(:,1),   'cvHx') !WG temp!
+        call ReadArray (filespec, nc*2, cdummyr(:,1:2), 'cvQgam')
+        call ReadArray (filespec, nc,   cdummyr(:,1),  'cvVol')
     
         ! face quantities - ignore all except fcQalf
-        call cfrure (filespec, nf*4, fdummyr(:,1:4),   'fcBb')
-        call cfrure (filespec, nf,   fdummyr(:,1),    'fcS')
-        call cfrure (filespec, nf*2, fdummyr(:,1:2),   'fcHc')
-        call cfrure (filespec, nf,   fdummyr(:,1),   'fcHt')
-        call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQgam')
-        call cfrure (filespec, nf*2, fcQalf, 'fcQalf')
-        call cfrure (filespec, nf*2, fdummyr(:,1:2), 'fcQbet')
-        call cfrure (filespec, nf,   fdummyr(:,1),  'fcPbs')
+        call ReadArray (filespec, nf*4, fdummyr(:,1:4),   'fcBb')
+        call ReadArray (filespec, nf,   fdummyr(:,1),    'fcS')
+        call ReadArray (filespec, nf*2, fdummyr(:,1:2),   'fcHc')
+        call ReadArray (filespec, nf,   fdummyr(:,1),   'fcHt')
+        call ReadArray (filespec, nf*2, fdummyr(:,1:2), 'fcQgam')
+        call ReadArray (filespec, nf*2, fcQalf, 'fcQalf')
+        call ReadArray (filespec, nf*2, fdummyr(:,1:2), 'fcQbet')
+        call ReadArray (filespec, nf,   fdummyr(:,1),  'fcPbs')
     
         ! Determine aligned faces as those faces with cos(alpha) = 0
         ! But do it with a very small tolerance to avoid numerical garbage
@@ -1532,15 +1626,15 @@ module goatmod_types
         end where
 
         ! vertex quantities - only keep coordinates (and ffbz)
-        call cfrure (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
-        call cfrure (filespec, nv,   grid%vert%x,    'vxX')
-        call cfrure (filespec, nv,   grid%vert%y,    'vxY')
-        call cfrure (filespec, nv,   grid%vert%ffbz, 'vxFfbz')
-        call cfrure (filespec, nv,   vdummyr(:,1), 'vxFpsi')
+        call ReadArray (filespec, nv*4, vdummyr(:,1:4),   'vxBb')
+        call ReadArray (filespec, nv,   grid%vert%x,    'vxX')
+        call ReadArray (filespec, nv,   grid%vert%y,    'vxY')
+        call ReadArray (filespec, nv,   grid%vert%ffbz, 'vxFfbz')
+        call ReadArray (filespec, nv,   vdummyr(:,1), 'vxFpsi')
     
         ! flux surface quantities
-        call cfrure (filespec, nc,   cdummyr(:,1), 'cvConn')
-        call cfrure (filespec, grid%data%fluxdata%nFs,   &
+        call ReadArray (filespec, nc,   cdummyr(:,1), 'cvConn')
+        call ReadArray (filespec, grid%data%fluxdata%nFs,   &
             grid%data%fluxdata%fluxsurfacepsi, 'fsPsi')
     
         ! Eliminate 'ghost' vertices
@@ -4994,7 +5088,7 @@ module goatmod_types
         if (chardummy(8:17) >= '03.002.000') then
 
             ! Primary array dimensions
-            call cfruin (filespec,3,idum,'nCv,nFc,ns')
+            call ReadArray (filespec,3,idum,'nCv,nFc,ns')
             nc = idum(0) ! note: only reading in actual cells, no guard cells
             nf = idum(1)
             ns = idum(2)
@@ -5009,7 +5103,7 @@ module goatmod_types
         call AllocateState(state, nc, nf, ns)
 
         ! Read charges - not needed
-        !call cfrure(filespec, state%zamin)
+        !call ReadArray(filespec, state%zamin)
 
         ! Read state variables
         !---------------------
@@ -5021,16 +5115,16 @@ module goatmod_types
         else 
             ! Found, read state
             backspace(filespec)
-            call cfrure(filespec, nc*ns,    state%na, 'na')
-            call cfrure(filespec, nc,       state%ne, 'ne')
-            call cfrure(filespec, nc*ns,    state%ua, 'ua')
-            call cfrure(filespec, nf*2*ns,  state%uadia, 'uadia')
-            call cfrure(filespec, nc,       state%te, 'te')
-            call cfrure(filespec, nc,       state%ti, 'ti')
-            call cfrure(filespec, nc,       state%tn, 'tn')
-            call cfrure(filespec, nc,       state%po, 'po')
-            call cfrure(filespec, nc,       state%kt, 'kt')
-            call cfrure(filespec, nc,       state%zt, 'zt')
+            call ReadArray(filespec, nc*ns,    state%na, 'na')
+            call ReadArray(filespec, nc,       state%ne, 'ne')
+            call ReadArray(filespec, nc*ns,    state%ua, 'ua')
+            call ReadArray(filespec, nf*2*ns,  state%uadia, 'uadia')
+            call ReadArray(filespec, nc,       state%te, 'te')
+            call ReadArray(filespec, nc,       state%ti, 'ti')
+            call ReadArray(filespec, nc,       state%tn, 'tn')
+            call ReadArray(filespec, nc,       state%po, 'po')
+            call ReadArray(filespec, nc,       state%kt, 'kt')
+            call ReadArray(filespec, nc,       state%zt, 'zt')
             
         end if
 
@@ -5079,7 +5173,7 @@ module goatmod_types
         if (chardummy(8:17) >= '03.002.000') then
 
             ! Primary array dimensions
-            call cfruin (filespec,3,idum,'nCv,nFc,ns')
+            call ReadArray (filespec,3,idum,'nCv,nFc,ns')
             nc = idum(0) ! note: only reading in actual cells, no guard cells
             nf = idum(1)
             ns = idum(2)
@@ -5103,16 +5197,16 @@ module goatmod_types
         else 
             ! Found, read state
             backspace(filespec)
-            call cfrure(filespec, nc*ns,    state%na, 'na')
-            call cfrure(filespec, nc,       state%ne, 'ne')
-            call cfrure(filespec, nc*ns,    state%ua, 'ua')
-            call cfrure(filespec, nf*2*ns,  state%uadia, 'uadia')
-            call cfrure(filespec, nc,       state%te, 'te')
-            call cfrure(filespec, nc,       state%ti, 'ti')
-            call cfrure(filespec, nc,       state%tn, 'tn')
-            call cfrure(filespec, nc,       state%po, 'po')
-            call cfrure(filespec, nc,       state%kt, 'kt')
-            call cfrure(filespec, nc,       state%zt, 'zt')
+            call ReadArray(filespec, nc*ns,    state%na, 'na')
+            call ReadArray(filespec, nc,       state%ne, 'ne')
+            call ReadArray(filespec, nc*ns,    state%ua, 'ua')
+            call ReadArray(filespec, nf*2*ns,  state%uadia, 'uadia')
+            call ReadArray(filespec, nc,       state%te, 'te')
+            call ReadArray(filespec, nc,       state%ti, 'ti')
+            call ReadArray(filespec, nc,       state%tn, 'tn')
+            call ReadArray(filespec, nc,       state%po, 'po')
+            call ReadArray(filespec, nc,       state%kt, 'kt')
+            call ReadArray(filespec, nc,       state%zt, 'zt')
 
         end if   
         
@@ -5127,15 +5221,15 @@ module goatmod_types
 
             ! Found, read residuals
             backspace(filespec)            
-            call cfrure(filespec, nc*ns,    state%resco, 'resco')
-            call cfrure(filespec, nc,       state%reshe, 'reshe')
-            call cfrure(filespec, nc,       state%reshi, 'reshi')
-            call cfrure(filespec, nc,       state%reshn, 'reshn')
-            call cfrure(filespec, nc*ns,    state%resmo, 'resmo')
-            call cfrure(filespec, nc,       state%resmt, 'resmt')
-            call cfrure(filespec, nc,       state%respo, 'respo')
-            call cfrure(filespec, nc,       state%reskt, 'reskt')
-            call cfrure(filespec, nc,       state%reszt, 'reszt')
+            call ReadArray(filespec, nc*ns,    state%resco, 'resco')
+            call ReadArray(filespec, nc,       state%reshe, 'reshe')
+            call ReadArray(filespec, nc,       state%reshi, 'reshi')
+            call ReadArray(filespec, nc,       state%reshn, 'reshn')
+            call ReadArray(filespec, nc*ns,    state%resmo, 'resmo')
+            call ReadArray(filespec, nc,       state%resmt, 'resmt')
+            call ReadArray(filespec, nc,       state%respo, 'respo')
+            call ReadArray(filespec, nc,       state%reskt, 'reskt')
+            call ReadArray(filespec, nc,       state%reszt, 'reszt')
 
         endif
 

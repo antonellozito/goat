@@ -209,21 +209,6 @@ $(BUILDDIR)/Setup: $(SETUP_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
 	touch $(BUILDDIR)/Setup
 
-## IO_output 			: compile output routines
-$(BUILDDIR)/IO_output: $(OUTPUT_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
-	touch $(BUILDDIR)/IO_output
-
-## IO_input			: compile input routines
-$(BUILDDIR)/IO_input: $(INPUT_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
-	touch $(BUILDDIR)/IO_input
-
-## IO_b25			: compile b25 routines
-$(BUILDDIR)/IO_b25: $(B25_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
-	touch $(BUILDDIR)/IO_b25
-
 ## IO_carre			: compile carre routines
 $(BUILDDIR)/IO_carre: $(CARRE_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR) 
@@ -248,17 +233,6 @@ $(BUILDDIR)/Clayer: $(CLAYER_FILES)
 $(BUILDDIR)/ClayerF: $(CLAYERF_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
 	touch $(BUILDDIR)/ClayerF
-
-## ShapeOptimization 			: compile shape optimization modules
-$(BUILDDIR)/ShapeOptimization: $(SHAPEOPT_FILES)
-	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
-	touch $(BUILDDIR)/ShapeOptimization
-
-## ShapeOptimizationSolps 			: compile shape optimization modules for SOLPS
-$(BUILDDIR)/ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
-	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(BUILDDIR) -L$(B25LIBPATH) -l:libb2.a -lnetcdf $^ 
-	touch $(BUILDDIR)/ShapeOptimizationSolps 
-
 
 ##
 ## % Run commands
