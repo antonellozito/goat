@@ -1,92 +1,70 @@
-# GridDeform
+# GOAT
 
-Fortran90-based grid deformation tool for plasma edge grid deformation. 
-
-## Getting started
-
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://gitlab.kuleuven.be/tme-tfe/fusion/griddeform.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-- [ ] [Set up project integrations](https://gitlab.kuleuven.be/tme-tfe/fusion/griddeform/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!).  Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
+Grid Generation, Optimization and Adapation Toolbox (acronyms: GOAT/Goat/goat).
 
 ## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Toolbox to generate (2D) magnetic field aligned grids for plasma edge simulations. Currently focused on the SOLPS plasma edge simulator, but in principle any solver can be coupled. Arbitrary magnetic field topologies and (closed) geometry are supported. Please cite the following papers when using:
+- Grid generation: S. Van den Kerkhof, S. Carli, W. Dekeyser. "Automated 2D plasma edge grid generation for arbitrary magnetic topologies". Submitted for publication in Contributions to Plasma Physics
+- Grid optimization/deformation: S. Van den Kerkhof, N. Vervloesem, S. Carli, W. Dekeyser. "Application of an automated grid deformation tool for divertor shape optimization in SOLPS-ITER", Contributions to Plasma Physics, 2024, 64(7-8), e202300134. https://doi.org/10.1002/ctpp.202300134
+- Grid adaptation: N. Vervloesem, W. Dekeyser, S. Van den Kerkhof, M. Baelmans. "Error-based grid adaptation methods for plasma edge simulations with SOLPS-ITER", Contributions to Plasma Physics, 2024, 64(7-8), e202300126. https://doi.org/10.1002/ctpp.202300126
 
 ## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+To install goat, you need a Unix-like environment and the tcsh shell. Additionally, you need to have at least the following libraries and packages installed:
+- Make 
+- A fortran compiler that can cope with the F2008/F2018 standard (gfortran version 13.3.0 is currently being used by the developers)
+- A C compiler (gcc version 13.3.0 is currently being used by the developers)
+- SuiteSparse (see https://github.com/DrTimothyAldenDavis/SuiteSparse)
+- OpenBLAS
+
+Using Ubuntu, one can use the package manager to install these libraries (e.g. `sudo apt install libopenblas-dev` for OpenBLAS, `sudo apt install libsuitesparse-dev`, `sudo apt install gfortran`)
+To run the Python visualization scripts, a Python installation with additional packages (and their dependencies) is required:
+- Matplotlib
+- Numpy
+- Shapely
+
+Having these dependencies installed, the code is installed as follows:
+- open a clean tcsh terminal
+- clone the git repository
+- `cd` into the top folder after cloning and execute `source setup.csh`. This will load in the necessary environment variables for compilation.
+- To compile goat, execute `make goat` (or `make goat_debug`) to compile the executable name `goat.exe` and `goat_debug.exe`. After compilation, these should be found in the executables again.
+- To link properly to the newly compiled executables, rerun `source setup.csh` again
+
+To test if installation was successful, try one of the example cases (see Usage section below). 
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+To use goat, first compile it (see section Installation) to retrieve the goat executable `goat.exe` or `goat_debug.exe`. To run an example case (e.g. the ASDEX grid generation case), do the following steps:
+- open a clean tcsh terminal, `cd` to the top goat directory
+- execute `source setup.csh`
+- go to the example case (i.e. execute `cd ./Examples/ASDEX`)
+- run the example case by executing `goat.exe` or `goat_debug.exe`
+- After succesful execution, a `traduit.out.b2us` file is produced, along with other data in `./output`. The grid is stored in the `traduit.out.b2us` file. For SOLPS, this is the input for the `b2ag` preprocessor (along with a `b2ag.dat` file)
+- To visualize results, one can execute `pggoutput` in the terminal, which will read in the grid and additional data in the `output` folder (this may fail if non-standard names are used or if Python packages were not installed correctly)
+
+To create a new case, create a new folder called `Runs` on the same level as `src`. This folder will be ignored by the current .gitignore settings. To run goat, only three inputs are required:
+- a `GOAToptions.dat` file containing the user-specified options (best to copy-paste from an existing example)
+- an `rzpsi.dat` or `.equ` file containing the magnetic equilibrium data in 2D
+- a `structure.dat` file containing the vessel structures of the device. These structures should form a set of closed, nested, non-selfintersecting polygons, such that the interior of the domain is well defined.
+To run this case, follow the steps above for the example case, but go `./Runs/<name_of_your_case>` when executing goat.
+
+## Known issues
+- The current make-based build system does not always capture all dependencies - improvements welcome! In case of issues, run `make deepclean` to remove all intermediate files and build folders such that recompilation happens from scratch.
+
+## Known behavior that is not an issue
+- If one uses SOLPS and has sourced that setup file, the compilation and running of goat may be hampered. Solution: use a clean terminal as described above
 
 ## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+In case of issues, please contact either the developer(s) at KU Leuven or their supervisors:
+- Sander Van den Kerkhof (sander.vandenkerkhof@kuleuven.be) -> main developer
+- Wouter Dekeyser (wouter.dekeyser@kuleuven.be) -> supervisor
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+Contributions by the community, be it bugfixes, build improvements, or completely new features, are very much welcome! For large or fundamental changes, please first contact the developers to discuss this further. Other improvements can be done through pull requests after review by the main devs. 
 
 ## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+Please see the description for authors and reference papers for the different modules of goat. The authors are very grateful for the many interesting testcases provided by the plasma edge modelling community that helped shape this toolbox. 
 
 ## License
-For open source projects, say how it is licensed.
+Goat is licensed under a EUPLv1.2 license (see also LICENSE.md). 
 
 ## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Currently being actively developed and supported at KU Leuven. 
