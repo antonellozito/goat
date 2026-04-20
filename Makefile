@@ -234,6 +234,18 @@ $(BUILDDIR)/ClayerF: $(CLAYERF_FILES)
 	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
 	touch $(BUILDDIR)/ClayerF
 
+## ShapeOptimization 			: compile shape optimization modules
+$(BUILDDIR)/ShapeOptimization: $(SHAPEOPT_FILES)
+	$(FC) $(CFLAGS) $^ -I$(BUILDDIR)
+	touch $(BUILDDIR)/ShapeOptimization
+
+## ShapeOptimizationSolps 			: compile shape optimization modules for SOLPS
+$(BUILDDIR)/ShapeOptimizationSolps: $(SHAPEOPTSOLPS_FILES)
+	$(FC) $(CFLAGS) -I$(B25LIBPATH) -I$(BUILDDIR) -L$(B25LIBPATH) -l:libb2.a -lnetcdf $^ 
+	touch $(BUILDDIR)/ShapeOptimizationSolps 
+
+
+
 ##
 ## % Run commands
 ## %=============

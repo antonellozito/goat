@@ -330,6 +330,6 @@ ifdef DOSOLPS
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
     IO_carre ShapeOptimizationSolps Drivers SODrivers
 else
-SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
     IO_carre ShapeOptimization Drivers SODrivers
 endif
