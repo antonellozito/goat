@@ -324,8 +324,8 @@ CTEST_TARGETS = Clayer
 ## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
 ifdef DOSOLPS
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
-    IO_carre ShapeOptimizationSolps Drivers SODrivers
+    ShapeOptimizationSolps Drivers SODrivers
 else
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
-    IO_carre ShapeOptimization Drivers SODrivers
+    ShapeOptimization Drivers SODrivers
 endif
