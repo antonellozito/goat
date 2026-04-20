@@ -94,14 +94,6 @@ goat: $(addprefix $(BUILDDIR)/, $(GOAT_TARGETS)) $(BUILDDIR)/goat.o
 
 goat_debug: goat
 
-goattranslator: $(addprefix $(BUILDDIR)/,$(GOATTRANSLATOR_TARGETS) ) $(BUILDDIR)/goattranslator.o 
-	-mv -f *.o $(BUILDDIR);  
-	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/goattranslator.exe $(BUILDDIR)/*.o $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH) -lcxsparse \
-	$(SUITESPARSEPATH) -I src/Clayer/Include
-	rm $(BUILDDIR)/TranslateGOAToptionsFile.o; 
-	cp $(BUILDDIR)/goattranslator.exe ./executables/.
-
 tests: $(addprefix $(BUILDDIR)/,$(TEST_TARGETS) ) $(BUILDDIR)/tests.o 
 	-mv -f *.o $(BUILDDIR);  
 	-mv -f *.mod $(BUILDDIR); 
@@ -109,13 +101,6 @@ tests: $(addprefix $(BUILDDIR)/,$(TEST_TARGETS) ) $(BUILDDIR)/tests.o
 	$(SUITESPARSEPATH) -I src/Clayer/Include
 	rm $(BUILDDIR)/tests.o; 
 	cp $(BUILDDIR)/tests.exe ./executables/.
-
-gdrun: $(addprefix $(BUILDDIR)/,$(GDRUN_TARGETS) ) $(BUILDDIR)/MainRunFileGridDeformation.o
-	-mv -f *.o $(BUILDDIR);  
-	-mv -f *.mod $(BUILDDIR); 
-	$(FC) $(LFLAGS) -o $(BUILDDIR)/gdrun.exe $(BUILDDIR)/*.o $(LFLAGS) -l $(LAPACKPATH) $(BLASPATH) $(UMFPACKPATH)
-	rm $(BUILDDIR)/gdrun.o; 
-	cp $(BUILDDIR)/gdrun.exe ./executables/.
 
 testc: $(addprefix $(BUILDDIR)/,$(CTEST_TARGETS) ) $(BUILDDIR)/testc.o 
 	-mv -f *.o $(BUILDDIR);  
@@ -152,11 +137,6 @@ shapeopt_debug: shapeopt
 
 ## % Runfiles
 ## %=========
-## MainRunFileGridDeformation.o			: main runfile grid deformation
-# Compiling
-$(BUILDDIR)/MainRunFileGridDeformation.o: Runfiles/MainRunFileGridDeformation.F90
-	$(FC) $(CFLAGS) Runfiles/MainRunFileGridDeformation.F90 
-
 ## Goat.o 			: main run file goat
 $(BUILDDIR)/goat.o: Runfiles/Goat.F90
 	$(FC) $(CFLAGS) Runfiles/Goat.F90 -I$(BUILDDIR) $(DMUMPS_IPATH) $(DMUMPS_LPATH)
@@ -168,10 +148,6 @@ $(BUILDDIR)/tests.o: Runfiles/Tests.F90
 ## Testc.o 			: C layer tests
 $(BUILDDIR)/testc.o: Runfiles/Testc.c 
 	$(CC) $(CCFLAGS) Runfiles/Testc.c -lcxsparse $(SUITESPARSEPATH) -I src/Clayer/Include -I$(BUILDDIR) $(DMUMPS_IPATH)
-
-## goattranslator.o	: translator
-$(BUILDDIR)/goattranslator.o: Runfiles/TranslateGOAToptionsFile.F90
-	$(FC) $(CFLAGS) Runfiles/TranslateGOAToptionsFile.F90  -I$(BUILDDIR)
 
 ## shapeopt.o		: shape optimization 
 $(BUILDDIR)/shapeopt.o : Runfiles/ShapeOptimization.F90 
@@ -301,35 +277,26 @@ gd:
 # Cleanup
 .PHONY: clean
 clean: 
-	rm *.o $(wildcard gdrun*); rm $(GDRUN_TARGETS); rm $(GOATTRANSLATOR_TARGETS); rm $(SHAPEOPT_TARGETS); rm $(SHAPEOPTSOLPS_TARGETS);
-
-## deepclean			: clean by removing *.o, *.mod, and executables
-# Cleanup
-.PHONY: deepclean
-deepclean: 
-	rm *.o *.mod $(wildcard gdrun*); \
+	rm -f *.o; 
 	find . -name "*.mod" -type f -delete; \
-	rm $(GOAT_TARGETS); \
-	rm $(GOATTRANSLATOR_TARGETS); \
-	rm $(SHAPEOPT_TARGETS); \
-	rm $(SHAPEOPTSOLPS_TARGETS); \
-	rm goat; \
-	rm tests; \
-	rm goattranslator; \
-	rm testc; \
-	rm shapeopt; \
+	rm -f $(GOAT_TARGETS); \
+	rm -f $(SHAPEOPT_TARGETS); \
+	rm -f $(SHAPEOPTSOLPS_TARGETS); \
+	rm -f goat; \
+	rm -f tests; \
+	rm -f testc; \
+	rm -f shapeopt; \
 
 ## cleanbuilds   		: clean builds directory (removes all subdirectories)
 .PHONY: cleanbuilds 
 cleanbuilds: 
-	rm -r ./builds/*
+	rm -rf ./builds/*
 
-## cleanexeo			: clean o-files of executables
-.PHONY: cleanexeo
-cleanexeo:	
-	rm Goat.o; rm Tests.o; rm Testc.o; rm TranslateGOAToptionsFile.o; rm shapeopt.o
+## deepclean   		    : execute clean and remove all build directories
+.PHONY: deepclean 
+deepclean: cleanbuilds clean 
+
 	
-
 ## help			: print out documentation
 # Help - prints out all the ## statements
 .PHONY : help 

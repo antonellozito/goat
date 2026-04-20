@@ -234,9 +234,6 @@ endif
 ##
 ## % Files
 ## %======
-## MAIN_RUNFILE			: Main runfile (.F90) - single file
-MAIN_RUNFILE = MainRunFileGridDeformation.F90
-
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
 GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_readwrite.F90 src/General/mod_inputfileparser.F90 src/General/mod_plotter.F90 \
     src/General/mod_sparseinterface.F90  src/General/mod_sort.F90 $(wildcard src/General/*.F90)      
@@ -327,15 +324,9 @@ SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
 
 ## % Targets
 ## %========
-## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre Drivers 
-
 ## GOAT_TARGETS             : Targets to be run for the full goat
-GOAT_TARGETS = $(GDRUN_TARGETS) 
-
-## GOATTRANSLATOR_TARGETS   : Targets to be run for the goat input file translator
-GOATTRANSLATOR_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics
+GOAT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
+    IO_carre Drivers 
 
 ## TEST_TARGETS             : Targets to be run for goat tests
 TEST_TARGETS = $(GOAT_TARGETS) 
