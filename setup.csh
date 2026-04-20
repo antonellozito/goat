@@ -10,29 +10,28 @@
 
 # Say hi to the user
 echo ' Welcome to the ... '
-echo '    ______     _     __                                                   '
-echo '   / ____/____(_)___/ /                                                   '
-echo '  / / __/ ___/ / __  /                                                    '
-echo ' / /_/ / /  / / /_/ /                                                     ' 
-echo ' \____/_/  /_/\__,_/                                                      '
-echo '    ____        __  _           _             __  _                ___    '
-echo '   / __ \____  / /_(_)___ ___  (_)___  ____ _/ /_(_)___  ____     ( _ )   '
-echo '  / / / / __ \/ __/ / __ `__ \/ /_  / / __ `/ __/ / __ \/ __ \   / __ \/| '
-echo ' / /_/ / /_/ / /_/ / / / / / / / / /_/ /_/ / /_/ / /_/ / / / /  / /_/  <  '
-echo ' \____/ .___/\__/_/_/ /_/ /_/_/ /___/\__,_/\__/_/\____/_/ /_/   \____/\/  '
-echo '     /_/       __            __        __  _                              '
-echo '    /   | ____/ /___ _____  / /_____ _/ /_(_)___  ____                    '
-echo '   / /| |/ __  / __ `/ __ \/ __/ __ `/ __/ / __ \/ __ \                   '
-echo '  / ___ / /_/ / /_/ / /_/ / /_/ /_/ / /_/ / /_/ / / / /                   '                 
-echo ' /_/  |_\__,_/\__,_/ .___/\__/\__,_/\__/_/\____/_/ /_/                    '                
-echo '   ______         /_/____                                                 '               
-echo '  /_  __/___  ____  / / /_  ____  _  __                                   '              
-echo '   / / / __ \/ __ \/ / __ \/ __ \| |/_/                                   '             
-echo '  / / / /_/ / /_/ / / /_/ / /_/ />  <                                     '            
-echo ' /_/  \____/\____/_/_.___/\____/_/|_|                                     '
+echo '   ______     _     __   ______                           __  _           '
+echo '  / ____/____(_)___/ /  / ____/__  ____  ___  _________ _/ /_(_)___  ____ '
+echo ' / / __/ ___/ / __  /  / / __/ _ \/ __ \/ _ \/ ___/ __ `/ __/ / __ \/ __ \'
+echo '/ /_/ / /  / / /_/ /  / /_/ /  __/ / / /  __/ /  / /_/ / /_/ / /_/ / / / /'
+echo '\____/_/  /_/\__,_/   \____/\___/_/ /_/\___/_/   \__,_/\__/_/\____/_/ /_/ '
+echo '   ____        __  _           _             __  _                ___     '
+echo '  / __ \____  / /_(_)___ ___  (_)___  ____ _/ /_(_)___  ____     ( _ )    '
+echo ' / / / / __ \/ __/ / __ `__ \/ /_  / / __ `/ __/ / __ \/ __ \   / __ \/|  '
+echo '/ /_/ / /_/ / /_/ / / / / / / / / /_/ /_/ / /_/ / /_/ / / / /  / /_/  <   '
+echo '\____/ .___/\__/_/_/ /_/ /_/_/ /___/\__,_/\__/_/\____/_/ /_/   \____/\/   '
+echo '    /_/       __            __        __  _                               '
+echo '   /   | ____/ /___ _____  / /_____ _/ /_(_)___  ____                     '
+echo '  / /| |/ __  / __ `/ __ \/ __/ __ `/ __/ / __ \/ __ \                    '
+echo ' / ___ / /_/ / /_/ / /_/ / /_/ /_/ / /_/ / /_/ / / / /                    '
+echo '/_/  |_\__,_/\__,_/ .___/\__/\__,_/\__/_/\____/_/ /_/                     '
+echo '  ______         /_/____                                                  '
+echo ' /_  __/___  ____  / / /_  ____  _  __                                    '
+echo '  / / / __ \/ __ \/ / __ \/ __ \| |/_/                                    '
+echo ' / / / /_/ / /_/ / / /_/ / /_/ />  <                                      '
+echo '/_/  \____/\____/_/_.___/\____/_/|_|                                      '
+echo '                                                                          '
 echo ' '
-echo 'Documentation: currently none!'
-echo 'Current implementation: grid optimization, grid adaptation, and grid generation'
 
 # Set goat top directory
 setenv LAST_COMMAND `echo $_`
@@ -79,21 +78,10 @@ else
   endsw
 endif
 
-# Load environment cache if it exists and the setup files have not changed
+# Load 
 set setup=${GOATTOP}/SETUP/setup.csh.${HOST_NAME}.${COMPILER}
-if ((-f $setup.env.local.${USER}) && \
-    ( -M $setup.env.local.${USER} ) >= ( -M $setup ) && \
-    ( -M $setup.env.local.${USER} ) >= ( -M ${GOATTOP}/setup.csh ) && \
-    (!(-f ${GOATTOP}/SETUP/setup.csh.local) || \
-      ( -M $setup.env.local.${USER} ) >= ( -M ${GOATTOP}/SETUP/setup.csh.local )) && \
-    (!(-f $setup.local) || ( -M $setup.env.local.${USER} ) >= ( -M $setup.local ))) then
-    echo "Loading cached SETUP/setup.csh.${HOST_NAME}.${COMPILER}.env.local.${USER}."
-    source $setup.env.local.${USER}
-    exit 0
-else
-    set setup_pre = `mktemp` alias_pre = `mktemp` && alias >! $alias_pre
-    env|sed -ne "/^[ }]\|=(/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" >! $setup_pre
-endif
+set setup_pre = `mktemp` alias_pre = `mktemp` && alias >! $alias_pre
+env|sed -ne "/^[ }]\|=(/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" >! $setup_pre
 
 # Load default openmp settings
 source ${GOATTOP}/SETUP/openmp
@@ -124,18 +112,6 @@ alias pspp "python3 ${GOAT_VISUALIZATION}/SolpsPostProcess.py"
 alias pgainput "python3 ${GOAT_VISUALIZATION}/VisualizeGAinput.py"
 alias pgaoutput "python3 ${GOAT_VISUALIZATION}/VisualizeGAoutput.py"
 alias pgaerror "python3 ${GOAT_VISUALIZATION}/VisualizeGAerror.py"
-
-# Create environment cache for faster loading (setenv, unsetenv, and aliases)
-set setup_post = `mktemp`
-env | sed -ne "/^[ }]\|=()/b; s/\([^=]*\)=\(.*\)/setenv \1 '\2'/p" \
-   -e '1i# Generated environment cache. Do not edit!' >! $setup_post
-grep -F -v -f $setup_pre $setup_post >! $setup.env.local.${USER}
-sed -i -e "s/setenv/unsetenv/; s/ '.*'//" $setup_pre $setup_post
-grep -F -v -f $setup_post $setup_pre >> $setup.env.local.${USER}
-alias | grep -F -v -f $alias_pre | sed -e 's/^/alias /' \
-    -e "/\t(.*[;|&].*)/{s/\t(/\t'(/;s/)"'$'"/)'/;b}" \
-    -e "s/\t\([^(].*\)/\t'\1'/" -e 's/\t(/\t/;s/)$//' >> $setup.env.local.${USER}
-rm -f $setup_pre $setup_post $alias_pre
 
 # List loaded modules
 #module list

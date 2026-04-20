@@ -15,6 +15,7 @@ module mod_readwrite
     ! Modules
     use mod_precision
     use mod_errorhandler
+    use mod_specialchars 
 
     ! The usual
     implicit none
@@ -28,6 +29,13 @@ module mod_readwrite
     !                          INTERFACES                              !
     !                                                                  !
     !==================================================================!
+
+    ! Read array
+    interface ReadArray 
+        module procedure ReadArrayI8, ReadArrayR8, ReadNamedArrayI8, &
+            ReadNamedArrayR8, ReadNamedArray2DI8, ReadNamedArray2DR8, &
+            ReadNamedArray3DR8, ReadArray3DR8
+    end interface
 
     ! Write array
     interface WriteArray
@@ -161,6 +169,307 @@ module mod_readwrite
 
         end do
 
+
+    end subroutine
+
+    ! Read array of reals with predefined size
+    subroutine ReadArrayR8(fid, n, out)
+
+        ! Description
+        !============
+        ! Read an array with predefined size n (array goes from 1 to n)
+        ! from a file that has already been opened and is located at 
+        ! the correct position to commence reading. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        real(R8), intent(inout)         :: out(1:n)
+
+        ! Loop
+        integer(I8)                     :: i 
+
+        ! Read
+        read(fid, *) (out(i), i = 1, n)
+
+    end subroutine 
+
+    subroutine ReadArray2DR8(fid, n, out)
+
+        ! Description
+        !============
+        ! Read a 2D array from a file. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        real(R8), intent(inout)         :: out(:, :)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: temp 
+
+        ! Loop
+        integer(I8)                     :: i 
+
+        ! Read
+        !=====
+        ! First read in 1D array
+        allocate(temp(size(out, 1)*size(out, 2)))
+        temp = 0
+        read(fid, *) (temp(i), i = 1, n)
+
+        ! Reshape
+        out = reshape(temp, [size(out, 1), size(out, 2)])
+
+    end subroutine
+
+    subroutine ReadArray3DR8(fid, n, out)
+
+        ! Description
+        !============
+        ! Read a 2D array from a file. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        real(R8), intent(inout)         :: out(:, :, :)
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: temp 
+
+        ! Loop
+        integer(I8)                     :: i 
+
+        ! Read
+        !=====
+        ! First read in 1D array
+        allocate(temp(size(out, 1)*size(out, 2)))
+        temp = 0
+        read(fid, *) (temp, i = 1, n)
+
+        ! Reshape
+        out = reshape(temp, [size(out, 1), size(out, 2), size(out, 3)])
+
+    end subroutine
+
+    ! Read array of reals with header and predefined size
+    subroutine ReadNamedArrayR8(fid, n, out, name)
+
+        ! Description
+        !============
+        ! Read an array that has a header line that starts with 'name'.
+        ! We read from the current position in fid.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        real(R8), intent(inout)         :: out(1:n)
+        character(*), intent(in)        :: name 
+
+        ! Auxiliary
+        logical                         :: reachedeof 
+
+        ! Read
+        !=====
+        ! Find header
+        call ReadUntilFound(fid, name, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadNamedArrayR8: could not find array ' // &
+                'with (part of) header: "' // name // '" in the current file ' // &
+                'starting from the given position')
+        end if 
+
+        ! Read
+        call ReadArrayR8(fid, n, out)
+
+    end subroutine 
+
+    ! Read 2D array of reals with header and predefined size
+    subroutine ReadNamedArray2DR8(fid, n, out, name)
+
+        ! Description
+        !============
+        ! Read an array that has a header line that starts with 'name'.
+        ! We read from the current position in fid.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        real(R8), intent(inout)         :: out(:, :)
+        character(*), intent(in)        :: name 
+
+        ! Auxiliary
+        logical                         :: reachedeof 
+
+        ! Read
+        !=====
+        ! Find header
+        call ReadUntilFound(fid, name, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadNamedArray2DR8: could not find array ' // &
+                'with (part of) header: "' // name //'" in the current file ' // &
+                'starting from the given position')
+        end if 
+
+        ! Read
+        call ReadArray2DR8(fid, n, out)
+
+    end subroutine
+
+    ! Read 3D array of reals with header and predefined size
+    subroutine ReadNamedArray3DR8(fid, n, out, name)
+
+        ! Description
+        !============
+        ! Read an array that has a header line that starts with 'name'.
+        ! We read from the current position in fid.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        real(R8), intent(inout)         :: out(:, :, :)
+        character(*), intent(in)        :: name 
+
+        ! Auxiliary
+        logical                         :: reachedeof 
+
+        ! Read
+        !=====
+        ! Find header
+        call ReadUntilFound(fid, name, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadNamedArray3DR8: could not find array ' // &
+                'with (part of) header: "' // name //'" in the current file ' // &
+                'starting from the given position')
+        end if 
+
+        ! Read
+        call ReadArray3DR8(fid, n, out)
+
+    end subroutine
+
+    ! Read array of integers with predefined size
+    subroutine ReadArrayI8(fid, n, out)
+
+        ! Description
+        !============
+        ! Read an array with predefined size n (array goes from 1 to n)
+        ! from a file that has already been opened and is located at 
+        ! the correct position to commence reading. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        integer(I8), intent(inout)      :: out(1:n)
+
+        ! Loop
+        integer(I8)                     :: i 
+
+        ! Read
+        read(fid, *) (out(i), i = 1, n)
+
+    end subroutine 
+
+    subroutine ReadArray2DI8(fid, n, out)
+
+        ! Description
+        !============
+        ! Read a 2D array from a file. 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        integer(I8), intent(inout)      :: out(:, :)
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: temp 
+
+        ! Loop
+        integer(I8)                     :: i 
+
+        ! Read
+        !=====
+        ! First read in 1D array
+        allocate(temp(size(out, 1)*size(out, 2)))
+        temp = 0
+        read(fid, *) (temp(i), i = 1, n)
+
+        ! Reshape
+        out = reshape(temp, [size(out, 1), size(out, 2)])
+
+    end subroutine
+
+    ! Read array of integers with header and predefined size
+    subroutine ReadNamedArrayI8(fid, n, out, name)
+
+        ! Description
+        !============
+        ! Read an array that has a header line that starts with 'name'.
+        ! We read from the current position in fid.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        integer(I8), intent(inout)      :: out(1:n)
+        character(*), intent(in)        :: name 
+
+        ! Auxiliary
+        logical                         :: reachedeof 
+
+        ! Read
+        !=====
+        ! Find header
+        call ReadUntilFound(fid, name, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadNamedArrayI8: could not find array ' // &
+                'with (part of) header: "' // name //'" in the current file ' // &
+                'starting from the given position')
+        end if 
+
+        ! Read
+        call ReadArrayI8(fid, n, out)
+
+    end subroutine 
+
+    ! Read 2D array of integers with header and predefined size
+    subroutine ReadNamedArray2DI8(fid, n, out, name)
+
+        ! Description
+        !============
+        ! Read an array that has a header line that starts with 'name'.
+        ! We read from the current position in fid.
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        integer(I8), intent(in)         :: n, fid 
+        integer(I8), intent(inout)      :: out(:, :)
+        character(*), intent(in)        :: name 
+
+        ! Auxiliary
+        logical                         :: reachedeof 
+
+        ! Read
+        !=====
+        ! Find header
+        call ReadUntilFound(fid, name, reachedeof)
+        if (reachedeof) then 
+            call gdErrorHandler('ReadNamedArray2DI8: could not find array ' // &
+                'with (part of) header: "' // name //'" in the current file ' // &
+                'starting from the given position')
+        end if 
+
+        ! Read
+        call ReadArray2DI8(fid, n, out)
 
     end subroutine
 

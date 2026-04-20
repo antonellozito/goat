@@ -234,9 +234,6 @@ endif
 ##
 ## % Files
 ## %======
-## MAIN_RUNFILE			: Main runfile (.F90) - single file
-MAIN_RUNFILE = MainRunFileGridDeformation.F90
-
 ## GENERAL_FILES				: All general files (e.g. precision definition, ... )
 GENERAL_FILES = src/General/mod_errorhandler.F90 src/General/mod_readwrite.F90 src/General/mod_inputfileparser.F90 src/General/mod_plotter.F90 \
     src/General/mod_sparseinterface.F90  src/General/mod_sort.F90 $(wildcard src/General/*.F90)      
@@ -257,7 +254,6 @@ MODULE_FILES_GA = src/Modules/GA/gamod_math.F90 src/Modules/GA/gamod_types.F90 s
     $(wildcard src/Modules/GA/*.F90)    
 MODULE_FILES_GG = src/Modules/GG/ggmod_topology2D.F90 src/Modules/GG/ggmod_vertexdistribution2D.F90 \
     src/Modules/GG/ggmod_gridgeneration2D.F90 src/Modules/GG/ggmod_gridgenerator.F90
-MODULE_FILES_B25 = $(wildcard src/Modules/*.F)
 
 MODULE_FILES = $(wildcard src/Modules/Goat/*.F90)\
     src/Modules/GD/gdmod_types.F90 src/Modules/GD/gdmod_userinput.F90 src/Modules/GD/gdmod_plots.F90 src/Modules/GD/gdmod_designvariables.F90 \
@@ -280,18 +276,6 @@ AUXILIARY_FILES =  src/Auxiliary/mod_structured2Dgridding.F90 \
     $(wildcard src/Auxiliary/Contour/*.F90) \
     src/Auxiliary/mod_streamlinetracing2D.F90 \
     src/Auxiliary/Graphs/mod_graph.F90
-
-## B25_FILES			: b25 generation filenames (.F90, .F) - unsequenced
-B25_FILES = $(wildcard src/IO/B25/*.F90) $(wildcard src/IO/B25/*.F)
-
-## CARRE_FILES			: carre generation filenames (.F90, .F) - unsequenced
-CARRE_FILES = $(wildcard src/IO/CARRE/*.F90) $(wildcard src/IO/CARRE/*.F)
-
-## INPUT_FILES			: input generation filenames (.F90) - unsequenced
-INPUT_FILES = $(wildcard src/IO/Input/*.F90)
-
-## OUTPUT_FILES			: output generation filenames (.F90) - unsequenced
-OUTPUT_FILES = $(wildcard src/IO/Output/*.F90)
 
 ## SETUP_FILES			: setup file generation names (.F90) - unsequenced
 SETUP_FILES = $(wildcard src/Setup/*.F90)
@@ -327,15 +311,9 @@ SHAPEOPTSOLPS_FILES  =  src/Modules/ShapeOpt/somod_userinput.F90 \
 
 ## % Targets
 ## %========
-## GDRUN_TARGETS			: Targets to be run for the grid deformation
-GDRUN_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre Drivers 
-
 ## GOAT_TARGETS             : Targets to be run for the full goat
-GOAT_TARGETS = $(GDRUN_TARGETS) 
-
-## GOATTRANSLATOR_TARGETS   : Targets to be run for the goat input file translator
-GOATTRANSLATOR_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics
+GOAT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
+    Drivers 
 
 ## TEST_TARGETS             : Targets to be run for goat tests
 TEST_TARGETS = $(GOAT_TARGETS) 
@@ -346,8 +324,8 @@ CTEST_TARGETS = Clayer
 ## SHAPEOPT_TARGETS         : Targets to be run for shape optimization program
 ifdef DOSOLPS
 SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
-    IO_carre ShapeOptimizationSolps Drivers SODrivers
+    ShapeOptimizationSolps Drivers SODrivers
 else
-SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules IO_b25  \
-    IO_carre ShapeOptimization Drivers SODrivers
+SHAPEOPT_TARGETS = Clayer ClayerF Constants General Auxiliary Numerics Optimization Modules  \
+    ShapeOptimization Drivers SODrivers
 endif
