@@ -34,6 +34,7 @@ To test if installation was successful, try one of the example cases (see Usage 
 ## Usage
 To use goat, first compile it (see section Installation) to retrieve the goat executable `goat.exe` or `goat_debug.exe`. To run an example case (e.g. the ASDEX grid generation case), do the following steps:
 - open a clean tcsh terminal, `cd` to the top goat directory
+- create a `setup.csh` file for your machine/cluster, if not already present
 - execute `source setup.csh`
 - go to the example case (i.e. execute `cd ./Examples/ASDEX`)
 - run the example case by executing `goat.exe` or `goat_debug.exe`
