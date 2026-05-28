@@ -17442,7 +17442,7 @@ module ggmod_topology2D
             call Interpolate1D(actualsr(1:1), yint, dlc, y)
 
             ! Compute which points to keep 
-            keepind = [(i, i = 1, floor(actualsr(1)))]
+            keepind = [(i, i = 1, floor(actualsr(1))+1)]
 
             ! Compute new coordinates
             if (keependpoint) then 
@@ -17478,7 +17478,7 @@ module ggmod_topology2D
             call Interpolate1D(actualsr, yint, dlc, y)
 
             ! Compute which points to keep 
-            keepind = [(i, i = ceiling(actualsr(1))+1, floor(actualsr(2)))]
+            keepind = [(i, i = ceiling(actualsr(1))+1, floor(actualsr(2))+1)]
 
             ! Compute new coordinates
             if (keepstartpoint .and. keependpoint) then 
