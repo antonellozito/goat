@@ -10348,6 +10348,8 @@ module ggmod_topology2D
 
         ! Initialize
         ntpc = size(allc)
+        allocate(keepc(ntpc))
+        keepc = .true. 
         allocate(sc(ntpc), scr(ntpc), faceind(ntpc), sf(topomesh%face%ntot), &
             sfr(topomesh%face%ntot), contourind(topomesh%face%ntot), &
             xintrda(ntpc), yintrda(ntpc))
@@ -10366,44 +10368,45 @@ module ggmod_topology2D
 
         ! Compute intersections
         !$omp parallel do default(none) &
-        !$omp schedule(dynamic) collapse(2) & 
-        !$omp private(xout, yout, vindI, vindJ, iout, jout) & 
+        !$omp schedule(dynamic) & 
+        !$omp private(xout, yout, vindI, vindJ, iout, jout, i, j, tubef) & 
         !$omp shared(ntpc, topomesh, allc, sc, scr, faceind, sf, sfr, &
-        !$omp contourind, xintrda, yintrda)
+        !$omp contourind, xintrda, yintrda, tubeID)
         do i = 1, ntpc
-            do j = 1, topomesh%face%ntot
-                if (topomesh%face%type(j) == TMfacebndID) then ! Do we also need to check for aligned bnd?
-                    ! Compute intersections
-                    call SimplePolygonIntersections(allc(i)%x, allc(i)%y, &
-                        topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
-                        xout, yout, vindI, vindJ, iout, jout)
+            ! Get all faces of this tube
+            tubef = [topomesh%tube%GetBndFace(tubeID(i), 1), &
+                topomesh%tube%GetBndFace(tubeID(i), 2), &
+                topomesh%tube%GetFace(tubeID(i))]
+            do k = 1, size(tubef)
+                j = tubef(k)
+                ! Compute intersections
+                call SimplePolygonIntersections(allc(i)%x, allc(i)%y, &
+                    topomesh%face%x(j)%Get(), topomesh%face%y(j)%Get(), &
+                    xout, yout, vindI, vindJ, iout, jout)
 
-                    ! Add, if any
-                    if (allocated(xout)) then 
-                        if (size(xout) > 0) then 
-                            !$omp critical
-                            ! Add intersection data to contour
-                            call sc(i)%Append(vindI)
-                            call scr(i)%Append(iout)
-                            call xintrda(i)%Append(xout)
-                            call yintrda(i)%Append(yout)
-                            call faceind(i)%Append(spread(j, 1, size(vindI)))
+                ! Add, if any
+                if (allocated(xout)) then 
+                    if (size(xout) > 0) then 
+                        !$omp critical
+                        ! Add intersection data to contour
+                        call sc(i)%Append(vindI)
+                        call scr(i)%Append(iout)
+                        call xintrda(i)%Append(xout)
+                        call yintrda(i)%Append(yout)
+                        call faceind(i)%Append(spread(j, 1, size(vindI)))
 
-                            ! Add intersection data to face
-                            call sf(j)%Append(vindJ)
-                            call sfr(j)%Append(jout)
-                            call contourind(j)%Append(spread(i, 1, size(vindI))) 
-                            !$omp end critical
-                        end if 
-                    end if
+                        ! Add intersection data to face
+                        call sf(j)%Append(vindJ)
+                        call sfr(j)%Append(jout)
+                        call contourind(j)%Append(spread(i, 1, size(vindI))) 
+                        !$omp end critical
+                    end if 
                 end if
             end do 
         end do
         !$omp end parallel do 
 
         ! Process contours
-        allocate(keepc(ntpc))
-        keepc = .true. 
         do i = 1, ntpc
             ! Unpack
             tsc = sc(i)%Get()
@@ -10435,6 +10438,13 @@ module ggmod_topology2D
                     'intersection of closed contour is not in boundary' )
                 end if 
             end if 
+
+            ! Check if there are any intersections with an aligned boundary
+            ! -> should not add contour as it intersects tube boundaries
+            if (size(GetCommonElements(topomesh%face%type(tfaceind), TMfacealignedID)) /= 0) then 
+                keepc(i) = .false. 
+                cycle
+            end if
 
             ! Determine which intersections were in the starting face
             isstartface = tfaceind == cface%Get(i)   
