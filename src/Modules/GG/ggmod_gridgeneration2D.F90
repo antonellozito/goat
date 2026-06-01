@@ -2103,8 +2103,8 @@ module ggmod_gridgeneration2D
         
         ! Auxiliary
         integer(I8)                             :: nft, nct, t1, t2
-        integer(I8), allocatable, dimension(:)  :: tc, s1, s2, allIDs, &
-            vertmap, sortind, tracevert, ts1, ts2, &
+        integer(I8), allocatable, dimension(:)  :: tc, s1, s2, &
+            sortind, tracevert, ts1, ts2, &
             newvert
         real(R8)                                :: xb(1:2), yb(1:2), &
             tempr
@@ -2891,59 +2891,14 @@ module ggmod_gridgeneration2D
             end do
         end do 
 
-        ! Get all IDs and construct mapping
-        allIDs = pack([(k, k = 1, grid%vert%ntot)], .not. isvertexdeleted)
-        allocate(vertmap(grid%vert%ntot))
-        vertmap = 0_I8
-        vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
-
-        ! First, remove all segments that are not used anymore
-        call CleanGGTMData(ggtmdata)
-
-        ! Loop and adjust IDs - first segments, then tubes
-        do i = 1, ggtmdata%nseg 
-            ! First map
-            ggtmdata%seg(i)%vert = vertmap(ggtmdata%seg(i)%vert)
-            ggtmdata%seg(i)%sv = vertmap(ggtmdata%seg(i)%sv)
-            ggtmdata%seg(i)%ev = vertmap(ggtmdata%seg(i)%ev)
-
-            ! Remove vertices 
-            keepind = ggtmdata%seg(i)%vert /= 0 
-            allocate(newvert(count(keepind)), newdlcv(count(keepind)))
-            newvert = pack(ggtmdata%seg(i)%vert, keepind)
-            newdlcv = pack(ggtmdata%seg(i)%dlcv, keepind)
-
-            ! Sanity checks
-            if (ggtmdata%seg(i)%sv == 0 .or. ggtmdata%seg(i)%ev == 0) then 
-                call gdErrorHandler('PostProcessVertexDistribution: start ' // &
-                    'or end of vertex segment was removed, unexpected')
-            end if 
-
-            ! Update
-            call ggtmdata%seg(i)%AddVertices(newdlcv, newvert)
-
-            ! Housekeeping
-            deallocate(newdlcv, newvert)
-        end do 
-        do i = 1, cell%ntot 
-            ! Update
-            do j = 1, size(celldata(i)%tubes)
-                call celldata(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
-                call celldata(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
-            end do 
-        end do 
-        do i = 1, topomesh%face%ntot
-            ! Update
-            call ggtmdata%face(i)%line%UpdateLineData(ggtmdata)
-        end do 
+        ! Update ggtm data
+        call UpdateGGTMDataAfterVertexRemoval(ggtmdata, isvertexdeleted)
 
         ! Update number of grid vertices
         grid%vert%ntot = count(.not. isvertexdeleted)
 
-        ! Add LOS
-        !========
-        ! call DetermineLOSlimits(ggtmdata)
-
+        ! Add graph
+        !==========
         ! Construct graph
         !$omp parallel default(none) & 
         !$omp private(i, j) shared(ggtmdata)
@@ -2957,17 +2912,6 @@ module ggmod_gridgeneration2D
         end do 
         !$omp end single
         !$omp end parallel 
-
-        do i = 1, cell%ntot 
-            do j = 1, size(celldata(i)%tubes)
-                if ((celldata(i)%tubes(j)%hfline%vert(1) == &
-                    celldata(i)%tubes(j)%hfline%vert(celldata(i)%tubes(j)%hfline%nv)) .and. &
-                    (celldata(i)%tubes(j)%lfline%vert(1) == &
-                        celldata(i)%tubes(j)%lfline%vert(celldata(i)%tubes(j)%lfline%nv))) then 
-                    call celldata(i)%tubes(j)%VisualizeGraph('lpgraph')
-                end if 
-            end do 
-        end do 
         
         ! Housekeeping
         !=============
@@ -4872,198 +4816,6 @@ module ggmod_gridgeneration2D
     !------------------------------------------------------------------!
     !                  TOPOMESH GRID DATA ROUTINES                     !
     !------------------------------------------------------------------!
-
-    ! GGTM data initialization 
-    subroutine InitializeGGTMData(ggtmdata, topomesh)
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GGTMDataUDT)                  :: ggtmdata 
-        class(TopomeshUDT),intent(in)       :: topomesh
-
-        ! Auxiliary
-        
-        ! Loop
-        integer(I8)                         :: i 
-        
-        ! Initialize
-        !===========
-        ! Substructures (except segments)
-        allocate(ggtmdata%vert(topomesh%vert%ntot))
-        allocate(ggtmdata%face(topomesh%face%ntot))
-        allocate(ggtmdata%cell(topomesh%cell%ntot))
-        allocate(ggtmdata%tube(topomesh%tube%ntot))
-        ggtmdata%nseg = 0_I8
-        allocate(ggtmdata%seg(topomesh%vert%ntot + topomesh%face%ntot)) ! initial size
-
-        ! Construct segments
-        !===================
-        ! Initialize
-        associate(&
-                vert        => topomesh%vert,   &
-                vertdata    => ggtmdata%vert,   &
-                face        => topomesh%face,   &
-                facedata    => ggtmdata%face,   &
-                nseg        => ggtmdata%nseg    &
-                )
-
-        ! Construct vertex 'segments' and 'lines'
-        do i = 1, vert%ntot
-            ! Update counter
-            nseg = nseg + 1
-
-            ! Initialize segment
-            call ggtmdata%seg(nseg)%Initialize([vert%x(i), vert%x(i)], &
-                [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i, vert%type(i))
-
-            ! Initialize line
-            call vertdata(i)%line%Initialize(ggtmdata, [nseg], i, i)
-        end do 
-
-        ! Construct face segments
-        do i = 1, face%ntot
-            ! Update counter
-            nseg = nseg + 1
-
-            ! Initialize segment
-            call ggtmdata%seg(nseg)%Initialize(face%x(i)%Get(), &
-                face%y(i)%Get(), face%fsID(i), i, face%vert(i, 1), face%vert(i, 2), &
-                face%type(i))
-
-            ! Initialize line
-            call facedata(i)%line%Initialize(ggtmdata, [nseg], face%vert(i, 1), &
-                face%vert(i, 2))
-        end do 
-
-        ! Housekeeping
-        !=============
-        end associate
-
-    end subroutine 
-
-    ! GGTM data cleaning
-    subroutine CleanGGTMData(ggtmdata, mapping)
-
-        ! Description
-        !============
-        ! Clean up the ggtmdata structure by removing all segments that
-        ! are not used in any other data structure of ggtmdata. 
-        ! Optionally, a mapping is returned of which mapping(oldsegID) 
-        ! returns the new segment ID if it exists or zero if it was
-        ! deleted. 
-
-        ! Note: this does not imply any spatial uniqueness, i.e. a 
-        ! segment that has been split into multiple different segments
-        ! may still exist in a line in some structure, while its splitted 
-        ! segments exist in another. So there is no guarantee from this 
-        ! side that segments are 'unique' in that way 
-
-        ! Declare variables
-        !==================
-        ! Arguments
-        class(GGTMDataUDT)              :: ggtmdata 
-        integer(I8), allocatable, dimension(:), intent(out), optional :: mapping
-
-        ! Auxiliary
-        integer(I8), allocatable, dimension(:)  :: mpg ! actual mapping
-        logical, allocatable, dimension(:)      :: isused
-        type(GGTMSegmentUDT), allocatable       :: tempseg(:)
-
-        ! Loop
-        integer(I8)                             :: i, j, k 
-
-        ! Initialize
-        !===========
-        ! Unpack
-        associate(&
-            vert    => ggtmdata%vert,   &
-            face    => ggtmdata%face,   &
-            cell    => ggtmdata%cell,   &
-            tube    => ggtmdata%tube    &
-            )
-
-        ! Initialize
-        allocate(isused(ggtmdata%nseg), mpg(ggtmdata%nseg))
-        isused = .false. 
-        mpg = 0
-
-        ! Determine unused segments
-        !==========================
-        ! Vertices
-        do i = 1, size(vert)
-            isused(vert(i)%line%segID) = .true. 
-        end do 
-
-        ! Faces
-        do i = 1, size(face)
-            isused(face(i)%line%segID) = .true. 
-        end do 
-
-        ! Cells
-        do i = 1, size(cell)
-            do j  = 1, size(cell(i)%lines)
-                isused(cell(i)%lines(j)%segID) = .true.
-            end do 
-            do j = 1, size(cell(i)%tubes)
-                isused(cell(i)%tubes(j)%hfline%segID) = .true.
-                isused(cell(i)%tubes(j)%lfline%segID) = .true.
-            end do 
-        end do 
-
-        ! Tubes: nothing to do for now
-
-        ! Determine mapping
-        k = 0
-        do i = 1, ggtmdata%nseg
-            if (isused(i)) then 
-                k = k + 1
-                mpg(i) = k
-            end if 
-        end do 
-
-        ! Map segment IDs
-        !================
-        ! Vertices
-        do i = 1, size(vert)
-            vert(i)%line%segID = mpg(vert(i)%line%segID)
-        end do 
-
-        ! Faces
-        do i = 1, size(face)
-            face(i)%line%segID = mpg(face(i)%line%segID)
-        end do 
-
-        ! Cells
-        do i = 1, size(cell)
-            do j  = 1, size(cell(i)%lines)
-                cell(i)%lines(j)%segID = mpg(cell(i)%lines(j)%segID)
-            end do 
-            do j = 1, size(cell(i)%tubes)
-                cell(i)%tubes(j)%hfline%segID = mpg(cell(i)%tubes(j)%hfline%segID)
-                cell(i)%tubes(j)%lfline%segID = mpg(cell(i)%tubes(j)%lfline%segID)
-            end do 
-        end do 
-
-        ! Delete
-        !=======
-        allocate(tempseg(count(isused)))
-        tempseg = pack(ggtmdata%seg, isused)
-        ggtmdata%seg = tempseg
-        ggtmdata%nseg = size(tempseg)
-
-        ! Housekeeping
-        !=============
-        end associate
-
-        ! Optional output arguments
-        !==========================
-        if (present(mapping)) then 
-            mapping = mpg
-        end if 
-
-    end subroutine
-
     ! Vertex distribution over faces
     subroutine DistributeVerticesTopologicalMeshFaces(grid, ggtmdata, topomesh, &
         vd, GGTMlinerefiner, facetypes)
@@ -9758,7 +9510,7 @@ module ggmod_gridgeneration2D
 
     ! Addition
     subroutine AddGGTMSegment(ggtmdata, xl, yl, fsID, TMfaceID, &
-        sv, ev, TMfacetype)
+        sv, ev, TMfacetype, newsegID)
 
         ! Description
         !============
@@ -9774,6 +9526,7 @@ module ggmod_gridgeneration2D
         real(R8), intent(in), dimension(:)          :: xl, yl 
         integer(I8), intent(in)                     :: fsID, TMfaceID, &
             sv, ev, TMfacetype
+        integer(I8), intent(out), optional          :: newsegID
 
         ! Auxiliary
         type(GGTMSegmentUDT)                        :: tseg 
@@ -9788,6 +9541,11 @@ module ggmod_gridgeneration2D
         
         ! Add to ggtmdata
         ggtmdata%seg = [ggtmdata%seg, tseg]
+
+        ! Output
+        if (present(newsegID)) then 
+            newsegID = ggtmdata%nseg
+        end if 
 
     end subroutine
 
@@ -10143,6 +9901,275 @@ module ggmod_gridgeneration2D
                         call cell(i)%tubes(j)%lfline%Initialize(ggtmdata, linesegID, sv, ev)
                     end if 
                 end do                 
+            end do 
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine
+
+    ! Segment merging
+    subroutine MergeGGTMSegments(ggtmdata, segIDs)
+
+        ! Description
+        !============
+        ! This routine merges the segment IDs (assumed sorted!) given by
+        ! the 'segIDs' input array into a single segment and updates 
+        ! any occurrences in lines in the ggtm data structure by 
+        ! replacing this segment and updating the lines. The segIDs are
+        ! not removed in this routine such that the segIDs of other
+        ! lines do not change. 
+
+        ! Note: it is assumed that the segment IDs of any line are 
+        ! unique for that line (which, in any proper grid, should be the case)
+
+        ! Modules
+        !========
+        use mod_search, only: findloc1D
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                      :: ggtmdata
+        integer(I8), dimension(:), intent(in)   :: segIDs 
+
+        ! Auxiliary
+        real(R8), allocatable, dimension(:)     :: xl, yl, dlcv
+        integer(I8)                             :: fsID, TMfacetype, &
+            TMfaceID, sv, ev, newsegID, indfw, indbw
+        integer(I8), allocatable, dimension(:)  :: vertID, TMfaceIDu, &
+            TMfacetypeu, fsIDu, tsegID, linesegID
+        type(GGTMSegmentUDT)                    :: tempseg
+
+        ! Loop
+        integer(I8)                             :: i, j 
+
+        ! Initialize
+        !===========
+        ! Check size of segIDs
+        if (size(segIDs) < 2) then 
+            ! Probably not expected, issue warning and exit
+            print *,'MergeGGTMSegments: less than 2 segments given, ' // & 
+                'returning...'
+        end if 
+
+        ! Construct the new segment
+        !==========================
+        ! Initialize
+        allocate(xl(0), yl(0), dlcv(0), vertID(0))
+        call Unique([ggtmdata%seg(segIDs)%TMfaceID], TMfaceIDu)
+        call Unique([ggtmdata%seg(segIDs)%TMfacetype], TMfacetypeu)
+        call Unique([ggtmdata%seg(segIDs)%fsID], fsIDu)
+        if (size(TMfaceIDu) /= 1) then 
+            ! Multiple face IDs, unexpected. Throw error
+            call gdErrorHandler('MergeGGTMSegments: segments span ' // & 
+                'multiple topomesh faces, unexpected.')
+        end if 
+        if (size(TMfacetypeu) /= 1) then 
+            ! Not multiple faces but multiple types - that's a clear bug
+            call gdErrorHandler('MergeGGTMSegments: segments span ' // & 
+                'multiple face types but only one face, this is a bug.')
+        end if 
+        if (size(fsIDu) /= 1) then 
+            ! Not multiple faces or types, but multiple fsIDs, also a bug
+            call gdErrorHandler('MergeGGTMSegments: segments span ' // & 
+                'multiple flux surface IDs but only one face, this is a bug.')
+        end if 
+        fsID = fsIDu(1)
+        TMfacetype = TMfacetypeu(1)
+        TMfaceID = TMfaceIDu(1)
+
+        ! Construct - start from first segment, append others
+        tempseg = ggtmdata%seg(segIDs(1))
+        xl      = tempseg%xl 
+        yl      = tempseg%yl 
+        vertID  = tempseg%vert
+        dlcv    = tempseg%dlcv
+        sv      = tempseg%sv 
+        do i = 2, size(segIDs)
+            ! Unpack
+            tempseg = ggtmdata%seg(segIDs(i))
+            if (tempseg%sv == vertID(size(vertID))) then 
+                ! Properly oriented
+            elseif (tempseg%ev == vertID(size(vertID))) then 
+                ! Need to flip
+                call tempseg%Flip()
+            else
+                ! Shouldn't happen
+                call gdErrorHandler('MergeGGTMSegments: next segment does ' // & 
+                    'not have a start or end vertex in common with the ' // &
+                    'previous segment, unexpected')
+            end if 
+
+            ! Append
+            xl = [xl, tempseg%xl(2:)]
+            yl = [yl, tempseg%yl(2:)]
+            vertID = [vertID, tempseg%vert(2:)]
+            dlcv = [dlcv, tempseg%dlcv(2:)+dlcv(size(dlcv))]
+            ev = tempseg%ev ! will be overwritten but last one kept, which is correct
+        end do
+
+        ! Add to ggtmdata
+        call ggtmdata%AddSegment(xl, yl, fsID, TMfaceID, sv, ev, &
+            TMfacetype, newsegID)
+
+        ! Add vertices 
+        call ggtmdata%seg(newsegID)%AddVertices(dlcv, vertID)
+
+        ! Replace segment IDs
+        !====================
+        ! Unpack for ease
+        associate(&
+            face        => ggtmdata%face,   &
+            cell        => ggtmdata%cell,   &
+            vert        => ggtmdata%vert    &
+            )
+
+        ! Vertices (probably shouldn't be replaced, but checking anyway for consistency)
+        do i = 1, size(vert)
+            ! Check if we find the pattern
+            tsegID = vert(i)%line%segID
+            indfw = findloc1D(tsegID, segIDs, back=.false.)
+            indbw = findloc1D(tsegID, segIDs(size(segIDs):1:-1))
+            if ((indfw == 0) .and. (indbw == 0)) then 
+                ! Nothing to replace, skip remainder of loop
+                cycle
+            elseif ((indfw /= 0) .and. (indbw == 0)) then 
+                ! Found
+                linesegID = [tsegID(:indfw-1), newsegID, tsegID(indfw+size(segIDs):)]
+
+            elseif ((indfw == 0) .and. (indbw /= 0)) then 
+                ! Found
+                linesegID = [tsegID(:indbw-size(segIDs)), &
+                    newsegID, tsegID(indbw+1:)]
+            else 
+                ! Both nonzero, unexpected
+                call gdErrorHandler('MergeGGTMSegments: found segIDs in both ' // &
+                    'backward and forward direction, unexpected.')
+            end if 
+
+            ! Replace if we found it
+            sv = vert(i)%line%vert(1)
+            ev = vert(i)%line%vert(vert(i)%line%nv)
+            call vert(i)%line%Initialize(ggtmdata, linesegID, sv, ev)
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            ! Check if we find the pattern
+            tsegID = face(i)%line%segID
+            indfw = findloc1D(tsegID, segIDs, back=.false.)
+            indbw = findloc1D(tsegID, segIDs(size(segIDs):1:-1))
+            if ((indfw == 0) .and. (indbw == 0)) then 
+                ! Nothing to replace, skip remainder of loop
+                cycle
+            elseif ((indfw /= 0) .and. (indbw == 0)) then 
+                ! Found
+                linesegID = [tsegID(:indfw-1), newsegID, tsegID(indfw+size(segIDs):)]
+
+            elseif ((indfw == 0) .and. (indbw /= 0)) then 
+                ! Found
+                linesegID = [tsegID(:indbw-size(segIDs)), &
+                    newsegID, tsegID(indbw+1:)]
+            else 
+                ! Both nonzero, unexpected
+                call gdErrorHandler('MergeGGTMSegments: found segIDs in both ' // &
+                    'backward and forward direction, unexpected.')
+            end if 
+
+            ! Replace if we found it
+            sv = face(i)%line%vert(1)
+            ev = face(i)%line%vert(face(i)%line%nv)
+            call face(i)%line%Initialize(ggtmdata, linesegID, sv, ev)
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                ! Check if we find the pattern
+                tsegID = cell(i)%lines(j)%segID
+                indfw = findloc1D(tsegID, segIDs, back=.false.)
+                indbw = findloc1D(tsegID, segIDs(size(segIDs):1:-1))
+                if ((indfw == 0) .and. (indbw == 0)) then 
+                    ! Nothing to replace, skip remainder of loop
+                    cycle
+                elseif ((indfw /= 0) .and. (indbw == 0)) then 
+                    ! Found
+                    linesegID = [tsegID(:indfw-1), newsegID, tsegID(indfw+size(segIDs):)]
+
+                elseif ((indfw == 0) .and. (indbw /= 0)) then 
+                    ! Found
+                    linesegID = [tsegID(:indbw-size(segIDs)), &
+                        newsegID, tsegID(indbw+1:)]
+                else 
+                    ! Both nonzero, unexpected
+                    call gdErrorHandler('MergeGGTMSegments: found segIDs in both ' // &
+                        'backward and forward direction, unexpected.')
+                end if 
+
+                ! Replace if we found it
+                sv = cell(i)%lines(j)%vert(1)
+                ev = cell(i)%lines(j)%vert(cell(i)%lines(j)%nv)
+                call cell(i)%lines(j)%Initialize(ggtmdata, linesegID, sv, ev)
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                ! hfline
+                !-------
+                ! Check if we find the pattern
+                tsegID = cell(i)%tubes(j)%hfline%segID
+                indfw = findloc1D(tsegID, segIDs, back=.false.)
+                indbw = findloc1D(tsegID, segIDs(size(segIDs):1:-1))
+                if ((indfw == 0) .and. (indbw == 0)) then 
+                    ! Nothing to replace, skip remainder of loop
+                    cycle
+                elseif ((indfw /= 0) .and. (indbw == 0)) then 
+                    ! Found
+                    linesegID = [tsegID(:indfw-1), newsegID, tsegID(indfw+size(segIDs):)]
+
+                elseif ((indfw == 0) .and. (indbw /= 0)) then 
+                    ! Found
+                    linesegID = [tsegID(:indbw-size(segIDs)), &
+                        newsegID, tsegID(indbw+1:)]
+                else 
+                    ! Both nonzero, unexpected
+                    call gdErrorHandler('MergeGGTMSegments: found segIDs in both ' // &
+                        'backward and forward direction, unexpected.')
+                end if 
+
+                ! Replace if we found it
+                sv = cell(i)%tubes(j)%hfline%vert(1)
+                ev = cell(i)%tubes(j)%hfline%vert(cell(i)%tubes(j)%hfline%nv)
+                call cell(i)%tubes(j)%hfline%Initialize(ggtmdata, linesegID, sv, ev)
+
+                ! lfline
+                !-------
+                ! Check if we find the pattern
+                tsegID = cell(i)%tubes(j)%lfline%segID
+                indfw = findloc1D(tsegID, segIDs, back=.false.)
+                indbw = findloc1D(tsegID, segIDs(size(segIDs):1:-1))
+                if ((indfw == 0) .and. (indbw == 0)) then 
+                    ! Nothing to replace, skip remainder of loop
+                    cycle
+                elseif ((indfw /= 0) .and. (indbw == 0)) then 
+                    ! Found
+                    linesegID = [tsegID(:indfw-1), newsegID, tsegID(indfw+size(segIDs):)]
+
+                elseif ((indfw == 0) .and. (indbw /= 0)) then 
+                    ! Found
+                    linesegID = [tsegID(:indbw-size(segIDs)), &
+                        newsegID, tsegID(indbw+1:)]
+                else 
+                    ! Both nonzero, unexpected
+                    call gdErrorHandler('MergeGGTMSegments: found segIDs in both ' // &
+                        'backward and forward direction, unexpected.')
+                end if 
+
+                ! Replace if we found it
+                sv = cell(i)%tubes(j)%lfline%vert(1)
+                ev = cell(i)%tubes(j)%lfline%vert(cell(i)%tubes(j)%lfline%nv)
+                call cell(i)%tubes(j)%lfline%Initialize(ggtmdata, linesegID, sv, ev)            
             end do 
         end do 
 
@@ -13274,6 +13301,492 @@ module ggmod_gridgeneration2D
         ! Housekeeping
         !=============
         end associate
+
+    end subroutine
+
+    !------------------------------------------------------------------!
+    !                      GGTM DATA MGMT                              !
+    !------------------------------------------------------------------!
+
+    ! GGTM data initialization 
+    subroutine InitializeGGTMData(ggtmdata, topomesh)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                  :: ggtmdata 
+        class(TopomeshUDT),intent(in)       :: topomesh
+
+        ! Auxiliary
+        
+        ! Loop
+        integer(I8)                         :: i 
+        
+        ! Initialize
+        !===========
+        ! Substructures (except segments)
+        allocate(ggtmdata%vert(topomesh%vert%ntot))
+        allocate(ggtmdata%face(topomesh%face%ntot))
+        allocate(ggtmdata%cell(topomesh%cell%ntot))
+        allocate(ggtmdata%tube(topomesh%tube%ntot))
+        ggtmdata%nseg = 0_I8
+        allocate(ggtmdata%seg(topomesh%vert%ntot + topomesh%face%ntot)) ! initial size
+
+        ! Construct segments
+        !===================
+        ! Initialize
+        associate(&
+                vert        => topomesh%vert,   &
+                vertdata    => ggtmdata%vert,   &
+                face        => topomesh%face,   &
+                facedata    => ggtmdata%face,   &
+                nseg        => ggtmdata%nseg    &
+                )
+
+        ! Construct vertex 'segments' and 'lines'
+        do i = 1, vert%ntot
+            ! Update counter
+            nseg = nseg + 1
+
+            ! Initialize segment
+            call ggtmdata%seg(nseg)%Initialize([vert%x(i), vert%x(i)], &
+                [vert%y(i), vert%y(i)], vert%fsID(i), i, i, i, vert%type(i))
+
+            ! Initialize line
+            call vertdata(i)%line%Initialize(ggtmdata, [nseg], i, i)
+        end do 
+
+        ! Construct face segments
+        do i = 1, face%ntot
+            ! Update counter
+            nseg = nseg + 1
+
+            ! Initialize segment
+            call ggtmdata%seg(nseg)%Initialize(face%x(i)%Get(), &
+                face%y(i)%Get(), face%fsID(i), i, face%vert(i, 1), face%vert(i, 2), &
+                face%type(i))
+
+            ! Initialize line
+            call facedata(i)%line%Initialize(ggtmdata, [nseg], face%vert(i, 1), &
+                face%vert(i, 2))
+        end do 
+
+        ! Housekeeping
+        !=============
+        end associate
+
+    end subroutine 
+
+    ! GGTM data cleaning
+    subroutine CleanGGTMData(ggtmdata, mapping)
+
+        ! Description
+        !============
+        ! Clean up the ggtmdata structure by removing all segments that
+        ! are not used in any other data structure of ggtmdata. 
+        ! Optionally, a mapping is returned of which mapping(oldsegID) 
+        ! returns the new segment ID if it exists or zero if it was
+        ! deleted. 
+
+        ! Note: this does not imply any spatial uniqueness, i.e. a 
+        ! segment that has been split into multiple different segments
+        ! may still exist in a line in some structure, while its splitted 
+        ! segments exist in another. So there is no guarantee from this 
+        ! side that segments are 'unique' in that way 
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)              :: ggtmdata 
+        integer(I8), allocatable, dimension(:), intent(out), optional :: mapping
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: mpg ! actual mapping
+        logical, allocatable, dimension(:)      :: isused
+        type(GGTMSegmentUDT), allocatable       :: tempseg(:)
+
+        ! Loop
+        integer(I8)                             :: i, j, k 
+
+        ! Initialize
+        !===========
+        ! Unpack
+        associate(&
+            vert    => ggtmdata%vert,   &
+            face    => ggtmdata%face,   &
+            cell    => ggtmdata%cell,   &
+            tube    => ggtmdata%tube    &
+            )
+
+        ! Initialize
+        allocate(isused(ggtmdata%nseg), mpg(ggtmdata%nseg))
+        isused = .false. 
+        mpg = 0
+
+        ! Determine unused segments
+        !==========================
+        ! Vertices
+        do i = 1, size(vert)
+            isused(vert(i)%line%segID) = .true. 
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            isused(face(i)%line%segID) = .true. 
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                isused(cell(i)%lines(j)%segID) = .true.
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                isused(cell(i)%tubes(j)%hfline%segID) = .true.
+                isused(cell(i)%tubes(j)%lfline%segID) = .true.
+            end do 
+        end do 
+
+        ! Tubes: nothing to do for now
+
+        ! Determine mapping
+        k = 0
+        do i = 1, ggtmdata%nseg
+            if (isused(i)) then 
+                k = k + 1
+                mpg(i) = k
+            end if 
+        end do 
+
+        ! Map segment IDs
+        !================
+        ! Vertices
+        do i = 1, size(vert)
+            vert(i)%line%segID = mpg(vert(i)%line%segID)
+        end do 
+
+        ! Faces
+        do i = 1, size(face)
+            face(i)%line%segID = mpg(face(i)%line%segID)
+        end do 
+
+        ! Cells
+        do i = 1, size(cell)
+            do j  = 1, size(cell(i)%lines)
+                cell(i)%lines(j)%segID = mpg(cell(i)%lines(j)%segID)
+            end do 
+            do j = 1, size(cell(i)%tubes)
+                cell(i)%tubes(j)%hfline%segID = mpg(cell(i)%tubes(j)%hfline%segID)
+                cell(i)%tubes(j)%lfline%segID = mpg(cell(i)%tubes(j)%lfline%segID)
+            end do 
+        end do 
+
+        ! Delete
+        !=======
+        allocate(tempseg(count(isused)))
+        tempseg = pack(ggtmdata%seg, isused)
+        ggtmdata%seg = tempseg
+        ggtmdata%nseg = size(tempseg)
+
+        ! Housekeeping
+        !=============
+        end associate
+
+        ! Optional output arguments
+        !==========================
+        if (present(mapping)) then 
+            mapping = mpg
+        end if 
+
+    end subroutine
+
+    ! GGTM data update after vertex removal
+    subroutine UpdateGGTMDataAfterVertexRemoval(ggtmdata, isvertexdeleted)
+
+        ! Description
+        !============
+        ! This routine remaps the grid vertices present in ggtmdata after
+        ! vertices have been deleted. The 'isvertexdeleted' vector should
+        ! be a logical vector that is true when a vertex was deleted. 
+        ! Based on this, a mapping is built that will remap vertices 
+        ! of the different segments. 
+
+        ! In case start/end vertices of segments are removed in lines, 
+        ! an attempt is made to merge subsequent segments into new 
+        ! segments in order to preserve the structure that segments
+        ! start and end in a grid vertex. A message will be shown if 
+        ! this would not be the case. This can be checked by constructing
+        ! the interconnection graph of the edges formed by the start and
+        ! end vertex of the segments. If any vertex is deleted that 
+        ! does not occur exactly twice in the graph, either an end 
+        ! vertex (only one edge) or a vertex of a branch (more than two)
+        ! has been deleted, and this simplification step will not be 
+        ! performed. Additionally, if any vertex that should be 
+        ! deleted is a start or end vertex of a line, then any merging
+        ! will not be done because this would result in lines being 
+        ! merged, which is (currently at least) not expected. This is 
+        ! checked for explicitly.
+
+        ! Note 1: vertex removal of start/end nodes is assumed to be 
+        ! accompanied by removal of relevant tubes/lines in the ggtm 
+        ! data structure *before* calling this routine. 
+
+        ! Note 2: it is assumed that segments and lines do not have
+        ! zero entries in their vertex structures and that the vertex
+        ! numbering is consistent with isvertexdeleted. 
+
+        ! Algorithm
+        !==========
+        ! 0)    Do input checks and clean the GGTM data from any 
+        !       unused segments. 
+        ! 1)    Check if any start or end vertices are deleted. If this
+        !       is not the case, continue to the remapping step. Otherwise, 
+        !       go to 2)
+        ! 2)    Start/end vertices are deleted. Construct the graph and 
+        !       check if any deleted vertices do not have exactly two 
+        !       edges they belong to. If this is the case, issue a 
+        !       warning and don't consider these vertices/segments for
+        !       simplification. Check also if start/end vertices of lines
+        !       are removed, these should also not be considered. 
+        ! 3)    For vertices that can be simplified, get their edges and
+        !       sort them to obtain polygons. These should be simple, 
+        !       non-branching polygons (and also not closed!). Then,
+        !       all segments belonging to this polygon can be 
+        !       concatenated into a single segment. This replacement
+        !       operation should be repeated for all lines etc that
+        !       are present in ggtmdata 
+        ! 4)    Construct the vertex mapping based on 'isvertexdeleted'
+        !       and remap all vertices. If any segments could not be 
+        !       merged, zero indices will be present in start/end...
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(GGTMDataUDT)                  :: ggtmdata 
+        logical, dimension(:), intent(in)   :: isvertexdeleted 
+
+        ! Auxiliary
+        logical                             :: islinevertdeleted
+        logical, allocatable, dimension(:)  :: isvertexmergeable, &
+            keepind, isdanglingvertex, isbranchingvertex, &
+            ismergeableseg, ispolygonstart, isbranchingpolygon
+        integer(I8)                         :: maxvertID, &
+            nmergeableseg, np
+        integer(I8), allocatable, dimension(:)  :: vertmap, allIDs, &
+            newvert, polstart, polend, segIDs, sortedseg, sortindex
+        integer(I8), allocatable, dimension(:, :)   :: pein
+        real(R8), allocatable, dimension(:) :: newdlcv
+
+        type(UGraphUDT)                     :: seggraph
+ 
+        ! Loop
+        integer(I8)                         :: i, j, k
+
+        ! Initialize
+        !===========
+        ! Clean the data structure
+        call CleanGGTMData(ggtmdata)
+
+        ! Check dimensions of isvertexdeleted & vertex occurrence in 
+        ! ggtmdata
+        maxvertID = 0
+        do i = 1, ggtmdata%nseg 
+            maxvertID = max(maxvertID, maxval(ggtmdata%seg(i)%vert))
+        end do 
+        if (size(isvertexdeleted) /= maxvertID) then 
+            print *, 'maximal vertex ID in ggtmdata: ', maxvertID 
+            print *, 'size of isvertexdeleted: ', size(isvertexdeleted)
+            call gdErrorHandler('UpdateGGTMDataAfterVertexRemoval: ' // & 
+                'inconsistent dimension of isvertexdeleted')
+        end if 
+
+        ! Check if start or end vertices of lines are deleted
+        islinevertdeleted = .false. 
+        isvertexmergeable = isvertexdeleted
+        do i = 1, size(ggtmdata%face)
+            associate(line    => ggtmdata%face(i)%line)
+            if (isvertexdeleted(line%vert(1))) then 
+                islinevertdeleted = .true. 
+                isvertexmergeable(line%vert(1)) = .false. 
+            end if 
+            if (isvertexdeleted(line%vert(line%nv))) then 
+                islinevertdeleted = .true. 
+                isvertexmergeable(line%vert(line%nv)) = .false. 
+            end if 
+            end associate
+        end do 
+        do i = 1, size(ggtmdata%cell)
+            do j = 1, size(ggtmdata%cell(i)%lines)
+                associate(line    => ggtmdata%cell(i)%lines(j))
+                if (isvertexdeleted(line%vert(1))) then 
+                islinevertdeleted = .true. 
+                isvertexmergeable(line%vert(1)) = .false. 
+                end if 
+                if (isvertexdeleted(line%vert(line%nv))) then 
+                    islinevertdeleted = .true. 
+                    isvertexmergeable(line%vert(line%nv)) = .false. 
+                end if 
+                end associate
+            end do 
+            do j = 1, size(ggtmdata%cell(i)%tubes)
+                associate(line    => ggtmdata%cell(i)%tubes(j)%hfline)
+                if (isvertexdeleted(line%vert(1))) then 
+                    islinevertdeleted = .true. 
+                    isvertexmergeable(line%vert(1)) = .false. 
+                end if 
+                if (isvertexdeleted(line%vert(line%nv))) then 
+                    islinevertdeleted = .true. 
+                    isvertexmergeable(line%vert(line%nv)) = .false. 
+                end if 
+                end associate
+                associate(line    => ggtmdata%cell(i)%tubes(j)%lfline)
+                if (isvertexdeleted(line%vert(1))) then 
+                    islinevertdeleted = .true. 
+                    isvertexmergeable(line%vert(1)) = .false. 
+                end if 
+                if (isvertexdeleted(line%vert(line%nv))) then 
+                    islinevertdeleted = .true. 
+                    isvertexmergeable(line%vert(line%nv)) = .false. 
+                end if 
+                end associate
+            end do 
+        end do 
+        if (islinevertdeleted) then 
+            ! Print warning
+            print *, 'UpdateGGTMDataAfterVertexRemoval: warning: vertices ' // & 
+                'deleted that were start or end vertices of lines, errors ' // & 
+                'may occur in subsequent routines as the vertex indices ' // & 
+                'will be set to zero!'
+        end if
+
+        ! Reconstruct segments
+        !=====================
+        ! Only if needed
+        if (any(isvertexdeleted([ggtmdata%seg%sv, ggtmdata%seg%ev]))) then 
+            ! Construct the segment graph
+            call seggraph%Construct([ggtmdata%seg%sv], [ggtmdata%seg%ev], &
+                [ggtmdata%seg%sv, ggtmdata%seg%ev])
+
+            ! Check if there are any deleted nodes that have not exactly
+            ! two edges
+            isbranchingvertex = isvertexdeleted 
+            isdanglingvertex = isvertexdeleted
+            isbranchingvertex = .false.
+            isdanglingvertex = .false. 
+            isbranchingvertex(seggraph%v) = seggraph%vep2 > 2
+            isdanglingvertex(seggraph%v)  = seggraph%vep1 < 1
+            if (any(isbranchingvertex .and. isvertexdeleted)) then 
+                ! Issue message
+                print *, 'UpdateGGTMDataAfterVertexRemoval: branching ' // & 
+                    'vertices of segments have been deleted, errors ' // & 
+                    'may occur in subsequent routines as the vertex indices ' // & 
+                    'will be set to zero!'
+                
+            end if 
+            if (any(isdanglingvertex .and. isvertexdeleted)) then 
+                ! Issue message
+                print *, 'UpdateGGTMDataAfterVertexRemoval: dangling ' // & 
+                    'vertices of segments have been deleted, errors ' // & 
+                    'may occur in subsequent routines as the vertex indices ' // & 
+                    'will be set to zero!'
+                
+            end if
+
+            ! Unset for merging
+            where (isdanglingvertex .or. isbranchingvertex) isvertexmergeable = .false.
+
+            ! Get all segments that have a mergeable vertex
+            ismergeableseg = isvertexmergeable([ggtmdata%seg%sv]) .or. &
+                isvertexmergeable([ggtmdata%seg%ev])
+            nmergeableseg = count(ismergeableseg)
+
+            ! Sort these edges
+            allocate(pein(nmergeableseg, 2), ispolygonstart(nmergeableseg), &
+                isbranchingpolygon(nmergeableseg), sortedseg(nmergeableseg), &
+                sortindex(nmergeableseg))
+            pein(:, 1) = pack([ggtmdata%seg%sv], ismergeableseg)
+            pein(:, 2) = pack([ggtmdata%seg%ev], ismergeableseg)
+            call SortPolygonEdges(pein, nmergeableseg, sortindex, &
+                ispolygonstart, isbranchingpolygon) 
+            sortedseg = pack([(k, k = 1, ggtmdata%nseg)], ismergeableseg)
+            sortedseg = sortedseg(sortindex)
+
+            ! Checks
+            if (any(isbranchingpolygon)) then 
+                ! This should actually not happen anymore since we checked
+                ! branching polygons already before with the graph. Therefore,
+                ! we issue an error
+                call gdErrorHandler('UpdateGGTMDataAfterVertexRemoval: ' //&
+                    'branching polygons found, unexpected. This is likely ' // &
+                    'a bug')
+            end if 
+
+            ! For each 'polygon', replace the segments
+            np = count(ispolygonstart)
+            allocate(polstart(np), polend(np))
+            polstart(1) = 1
+            polend(np) = nmergeableseg
+            do i = 2, np
+                polstart(i) = findloc(ispolygonstart(polstart(i-1)+1:), .true.,dim=1)
+                polend(i-1) = polstart(i)-1
+            end do 
+            do i = 1, np
+                ! Get segment IDs
+                segIDs = sortedseg(polstart(i):polend(i))
+
+                ! Merge IDs and update ggtmdata structure
+                call MergeGGTMSegments(ggtmdata, segIDs)
+            end do
+
+            ! Clean the ggtm data structure
+            call CleanGGTMData(ggtmdata)
+
+        end if 
+
+        ! Remap
+        !======
+        ! Get all IDs and construct mapping
+        allIDs = pack([(k, k = 1, maxvertID)], .not. isvertexdeleted)
+        allocate(vertmap(maxvertID))
+        vertmap = 0_I8
+        vertmap(allIDs) = [(k, k = 1, count(.not. isvertexdeleted))]
+
+        ! Loop and adjust IDs - first segments, then tubes
+        do i = 1, ggtmdata%nseg 
+            ! First map
+            ggtmdata%seg(i)%vert = vertmap(ggtmdata%seg(i)%vert)
+            ggtmdata%seg(i)%sv = vertmap(ggtmdata%seg(i)%sv)
+            ggtmdata%seg(i)%ev = vertmap(ggtmdata%seg(i)%ev)
+
+            ! Remove vertices 
+            keepind = ggtmdata%seg(i)%vert /= 0 
+            allocate(newvert(count(keepind)), newdlcv(count(keepind)))
+            newvert = pack(ggtmdata%seg(i)%vert, keepind)
+            newdlcv = pack(ggtmdata%seg(i)%dlcv, keepind)
+
+            ! Sanity checks
+            if (ggtmdata%seg(i)%sv == 0 .or. ggtmdata%seg(i)%ev == 0) then 
+                call gdErrorHandler('UpdateGGTMDataAfterVertexRemoval: start ' // &
+                    'or end of vertex segment was removed, unexpected')
+            end if 
+
+            ! Update
+            call ggtmdata%seg(i)%AddVertices(newdlcv, newvert)
+
+            ! Housekeeping
+            deallocate(newdlcv, newvert)
+        end do 
+        do i = 1, size(ggtmdata%cell)
+            ! Update
+            do j = 1, size(ggtmdata%cell(i)%tubes)
+                call ggtmdata%cell(i)%tubes(j)%hfline%UpdateLineData(ggtmdata)
+                call ggtmdata%cell(i)%tubes(j)%lfline%UpdateLineData(ggtmdata)
+            end do 
+        end do 
+        do i = 1, size(ggtmdata%face)
+            ! Update
+            call ggtmdata%face(i)%line%UpdateLineData(ggtmdata)
+        end do 
+
 
     end subroutine
 
