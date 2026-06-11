@@ -1062,16 +1062,10 @@ module mod_contour2D
         ! Check if any values found, if not: add empty contour and 
         ! continue to next value
         issad = any(hasvv)
-        if (.not. any(hasvv) .and. (.not. any(isexactv))) then 
-            ! Empty contour - construct and return
-            allocate(contours(1))
-            contours(1) = ConstructContour(emptyarrayR8, &
-                emptyarrayR8, tv, 0, 0, 0, .false.)
-
+        allocate(contours(0)) 
+        if (.not. any(hasvv) .or. all(hasvv) .and. (.not. any(isexactv))) then 
             ! Return
             return
-        else
-            allocate(contours(0)) 
         end if 
 
         ! Values found, check if we need to perturb some locations
