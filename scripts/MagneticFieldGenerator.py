@@ -13,7 +13,7 @@ def MagneticField(x, y):
     #return psi
     Btor = 0.08666
     # psi = np.sqrt((x - 0.78)**2 + y**2) 
-    psi = 0.000001*Btor*x + 0.0000001*Btor*y
+    psi = 0.00001*Btor*x + 0.000000001*Btor*y
     return psi
 
     
@@ -42,7 +42,7 @@ yv = Rmin*np.sin(theta)
 
 # Construct structures
 structures = [gp.gt.Structure() for i in np.arange(0, 1, 1)]
-structures[0].Initialize(len(xv), xv, yv)
+structures[0].Initialize(len(xv), xv, yv, 0)
 
 # Write output
 gp.dh.WriteStructureFile(writedir, structures)
@@ -57,4 +57,4 @@ gp.pl.PlotStructured2DContourf(R, Z, Psi, 1)
 gp.pl.ShowFigures()
 
 # Write
-gp.dh.WriteRZPsiFile(writedir, R, Z, Psi)
+gp.dh.WriteRZPsiFile(writedir+'/rzpsi.dat', R, Z, Psi)
