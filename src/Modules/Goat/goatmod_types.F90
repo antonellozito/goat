@@ -2244,7 +2244,9 @@ module goatmod_types
         ! Vertex information
         tempstring = '*cf: Vx vxX vxY vxPsi vxBx vxBy vxFfbz'
         write(fu, '(a)' ) tempstring 
-        fmt = '('//Ifm// ',' //repeat(spacefm // Rfm // ',', 5)// spacefm // Rfm //')'
+        fmt = '(' // Ifm // ',' // &
+     &          repeat(spacefm // ',' // Rfm // ',', 5) // &
+     &          spacefm // ',' // Rfm // ')'
         do i = 1, nv 
             write(fu, fmt) i, xv(i), yv(i), psiv(i), Bxv(i), Byv(i), ffbzv(i)
         end do
@@ -2252,9 +2254,11 @@ module goatmod_types
         ! Cell information
         tempstring = '*cf: cv cvVxP(:,1) cvVxP(:,2) cvX cvY psi bp bt cflags(:) cvReg cvFt'
         write(fu, '(a)' ) tempstring 
-        fmt = '('//repeat(Ifm //',' //spacefm, 3)//&
-            repeat(Rfm //',' //spacefm, 5)// &
-            repeat(Ifm //',' //spacefm, 3)//')'
+        fmt = '(' // &
+     &          repeat(Ifm // ',' // spacefm // ',', 3) // &
+     &          repeat(Rfm // ',' // spacefm // ',', 5) // &
+     &          repeat(Ifm // ',' // spacefm // ',', 2) // &
+     &          Ifm // ')'
         do i = 1, nc 
             write(fu, fmt) i, cellvertP(i, 1), cellvertP(i, 2), xc(i), yc(i), &
                 psic(i), bpc(i), btc(i), flagc(i), regc(i), cellft(i)
@@ -2282,7 +2286,9 @@ module goatmod_types
         ! Face information
         tempstring = '*cf: fc fcVx(:,1) fcVx(:,2) fcLbl fcReg fcAligned'
         write(fu, '(a)' ) tempstring
-        fmt = '('//repeat(Ifm //',' //spacefm, 6) //')'
+        fmt = '(' // &
+     &          repeat(Ifm // ',' // spacefm // ',', 5) // &
+     &          Ifm // ')'
         do i = 1, nf 
               write(fu, fmt) i, facevert(i, 1), facevert(i, 2), labelf(i), &
                  regf(i), alignedf(i)
@@ -2303,7 +2309,9 @@ module goatmod_types
         ! Flux tube information
         tempstring = '*cf: ft ftCvP(:,1) ftCvP(:,2) ftFcP(:,1) ftFcP(:,2) ftReg'
         write(fu, '(a)' ) tempstring
-        fmt = '('//repeat(Ifm,  6) //')'
+        fmt = '(' // &
+     &      repeat(Ifm // ',' // spacefm // ',', 5) // &
+     &      Ifm // ')'
         do i = 1, nft
               write(fu, fmt) i, ftcellP(i, 1), ftcellP(i, 2), ftfaceP(i, 1), &
                  ftfaceP(i, 2), ftreg(i)
