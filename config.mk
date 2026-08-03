@@ -22,13 +22,16 @@ endif
 ## % Library paths
 ## %==============
 ## LAPACKPATH 			: LAPACK library path (user defined)
-LAPACKPATH = -lopenblas
+LAPACKPATH ?= -lopenblas
 
 ## BLASPATH 			: BLAS library path (user defined)
-BLASPATH = -lopenblas
+BLASPATH ?= -lopenblas
 
 ## UMFPACKPATH 			: UMFPACK library path (user defined)
-UMFPACKPATH = -lumfpack
+UMFPACKPATH ?= -lumfpack
+
+## CXSparsePATH          : CXSparse library path (user defined)
+CXSparsePATH ?=
 
 ## DMUMPSPATH            : DMUMPS library path (user defined, optional)
 #DMUMPSPATH = -ldmumps -lmumps_common -L/usr/lib -lmetis  -lesmumps -L../../PORD/lib/ -lpord -L../../lib -L../../libseq -lscotch -lscotcherr -L../../libseq/libmpiseq.a -lpthread
@@ -38,30 +41,30 @@ UMFPACKPATH = -lumfpack
 
 ## DMUMPSLIBPATH        : DMUMPS include path (user defined, optional)
 ifdef DMUMPS_LPATH 
-    ifdef DMUMPS_IPATH
-        ifndef NO_USE_MPI
+ifdef DMUMPS_IPATH
+ifndef NO_USE_MPI
             # Define mumps 
             MUMPS = yes 
             # Mumps has to be compiled with MPI
             USE_MPI = yes 
             $(info % MUMPS library and include paths set, MPI available. Compiling with MUMPS) 
-        else 
-            undefine USE_MPI
-            undefine DMUMPS_LPATH 
-            undefine DMUMPS_IPATH 
+else 
+USE_MPI =
+DMUMPS_LPATH =
+DMUMPS_IPATH =
             $(info % MUMPS paths available, but no MPI. Not compiling MUMPS.)
-        endif
-    else
+endif
+else
         # Not all paths define, issue message and undefine to ensure proper compilation
         $(info % MUMPS include path not set, set "DMUMPS_LPATH" and "DMUMPS_IPATH" to enable compilation with MUMPS)  
-        undefine DMUMPS_LPATH 
-        undefine DMUMPS_IPATH 
-    endif
+DMUMPS_LPATH =
+DMUMPS_IPATH =
+endif
 else
     # Not all paths define, issue message and undefine to ensure proper compilation
     $(info % MUMPS library path not set, set "DMUMPS_LPATH" and "DMUMPS_IPATH" to enable compilation with MUMPS) 
-    undefine DMUMPS_LPATH 
-    undefine DMUMPS_IPATH 
+DMUMPS_LPATH =
+DMUMPS_IPATH =
 endif
 
 # Define MUMPS for the compiler
@@ -135,32 +138,32 @@ endif
 ## %=========
 ## FC			: Compiler to be used for fortran (overridden if COMPILER is defined)
 ifdef COMPILER
-    ifeq ($(strip $(COMPILER)),gfortran)
-        ifdef USE_MPI
+ifeq ($(strip $(COMPILER)),gfortran)
+ifdef USE_MPI
             FC = mpif90 
-        else
+else
             FC = gfortran 
-        endif  
-    else ifeq ($(strip $(COMPILER)),ifort64)
-        ifdef USE_MPI
+endif  
+else ifeq ($(strip $(COMPILER)),ifort64)
+ifdef USE_MPI
             FC = mpiifort
-        else 
+else 
             FC = ifort 
-        endif 
-    else
-        ifdef USE_MPI
+endif 
+else
+ifdef USE_MPI
             FC = mpif90 
-        else
+else
             FC = gfortran 
-        endif  
-    endif 
+endif  
+endif 
 else 
     COMPILER = gfortran
-    ifdef (USE_MPI)
+ifdef USE_MPI
         FC = mpif90 
-    else
+else
         FC = gfortran 
-    endif  
+endif  
 endif 
 
 # Directory where objectcode/binaries will be created
@@ -172,7 +175,7 @@ BUILDDIR = ${PREF_OBJDIR}.${HOST_NAME}.${COMPILER}${EXT_OPENMP}${EXT_MPI}${EXT_I
 ## % Include paths
 ## %==============
 ## SUITESPARSEPATH      : SuiteSparse header file path
-SUITESPARSEPATH = -I/usr/include/suitesparse
+SUITESPARSEPATH ?= -I/usr/include/suitesparse
 
 ## CFLAGS			: Compiler flags for standard compilation (may be overridden)
 CFLAGS_DEF = -c -fopenmp
