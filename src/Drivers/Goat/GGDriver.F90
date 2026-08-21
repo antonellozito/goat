@@ -25,27 +25,30 @@ subroutine GGDriver(goatoptions)
     ! Declare variables
     !==================
     ! Arguments
-    type(GoatoptionsUDT)        :: goatoptions 
-    type(GridUDT)               :: grid 
-    type(MagneticFieldUDT)      :: magneticField 
+    type(GoatoptionsUDT)        :: goatoptions
+    type(GridUDT), allocatable  :: grid
+    type(MagneticFieldUDT)      :: magneticField
     type(EnvironmentUDT)        :: environment
 
     ! Other options
     type(GGoptionsUDT)          :: ggoptions
     type(TopomeshOptionsUDT)    :: topomeshoptions
-    
+
     ! Auxiliary
-    type(TopomeshUDT)           :: topomesh
+    type(TopomeshUDT), allocatable  :: topomesh
     class(ContourTracerUDT), allocatable    :: fieldtracer, vesseltracer
     class(StreamlineTracerUDT), allocatable :: streamlinetracer
     type(PolygonSetUDT)         :: voidps
-    type(GGTMDataUDT)           :: ggtmdata
+    type(GGTMDataUDT), allocatable  :: ggtmdata
 
     real(R8), allocatable, dimension(:)     :: xb, yb, xps, &
-        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy
+        yps, xg, yg, Vf, Vv, xgv, ygv, Vfx, Vfy, defx, defy, newx, newy, &
+        demx, demy, keepx, keepy
+    logical, allocatable, dimension(:)      :: isnew, keepmask
     real(R8), parameter                     :: emptyR8(0)= 0
-    integer(I8)                             :: nv
+    integer(I8)                             :: nv, iter, ie
     integer(I8), parameter                  :: emptyI8(0) = 0
+    integer(I8), parameter                  :: pinmaxiter = 20
     logical, parameter                      :: emptyL(0) = .false.
 
     ! Loop
@@ -87,47 +90,88 @@ subroutine GGDriver(goatoptions)
     call magneticField%interp%Evaluate(xg, yg, 1, 0, Vfx)
     call magneticField%interp%Evaluate(xg, yg, 0, 1, Vfy)
 
-    ! Field contours
-    fieldtracer = ConstructStructuredTracer(&
-        reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-        emptyR8, emptyR8, emptyR8, emptyi8, emptyL, topomeshoptions%npmin, &
-        topomeshoptions%npmax, topomeshoptions%dl)
+    ! Build the grid, iterating to pin structure endpoints
+    !======================================================
+    ! Each pass (re)builds the tracers, the topological mesh and the grid. When
+    ! endpoint pinning is on, structure endpoints still farther than the
+    ! tolerance from a grid boundary node (measured along the wall contour) are
+    ! appended to the forced-flux-surface list and the grid is rebuilt, until
+    ! every endpoint is within tolerance or the iteration cap is reached. With
+    ! pinning off the loop runs exactly once. The forced-surface list starts
+    ! empty (set in the topomesh option defaults).
+    do iter = 0, pinmaxiter
 
-    ! Vessel contours
-    vesseltracer = ConstructStructuredTracer(&
-        reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
-        emptyR8, emptyR8, emptyR8, emptyI8, emptyL, topomeshoptions%npmin, &
-        topomeshoptions%npmax, topomeshoptions%dl)
+        ! Fresh derived types for this build
+        if (allocated(topomesh)) deallocate(topomesh)
+        if (allocated(grid))     deallocate(grid)
+        if (allocated(ggtmdata)) deallocate(ggtmdata)
+        allocate(topomesh, grid, ggtmdata)
 
-    ! Orthogonal lines
-    streamlinetracer = ConstructStructuredStreamlineTracer(&
-        reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), &
-        reshape(Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), & 
-        xgv, ygv, step=ggoptions%orthtracerstep, nsteps=ggoptions%orthtracernsteps) 
+        ! (Re)construct the tracers
+        fieldtracer = ConstructStructuredTracer(&
+            reshape(Vf, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
+            emptyR8, emptyR8, emptyR8, emptyi8, emptyL, topomeshoptions%npmin, &
+            topomeshoptions%npmax, topomeshoptions%dl)
+        vesseltracer = ConstructStructuredTracer(&
+            reshape(Vv, [topomeshoptions%vresx, topomeshoptions%vresy]), xgv, ygv, &
+            emptyR8, emptyR8, emptyR8, emptyI8, emptyL, topomeshoptions%npmin, &
+            topomeshoptions%npmax, topomeshoptions%dl)
+        streamlinetracer = ConstructStructuredStreamlineTracer(&
+            reshape(Vfx, [topomeshoptions%vresx, topomeshoptions%vresy]), &
+            reshape(Vfy, [topomeshoptions%vresx, topomeshoptions%vresy]), &
+            xgv, ygv, step=ggoptions%orthtracerstep, nsteps=ggoptions%orthtracernsteps)
 
-    ! Visualize by tracing contours
-    !resc = 100
-    !dv = (maxval(Vf) - minval(Vf))
-    !cgv = [(k, k = 0, resc)]*(dv*0.90_R8)/real(resc, kind=R8) + minval(Vf) + dv*0.05
-    !contours = fieldtracer%TraceContours(cgv)
-    !allocate(pcontours(size(contours)))
-    !do k = 1, size(contours)
-    !    call pcontours(k)%Construct(contours(k)%x, contours(k)%y)
-    !end do 
-    !call tempps%Construct(pcontours)
-    !call tempps%WriteData('mfcontours')
+        ! Topological mesh
+        call ConstructTopologicalMesh(environment%vessel, magneticField, &
+            topomeshoptions, topomesh, fieldtracer, vesseltracer, streamlinetracer)
 
+        ! Grid
+        call GenerateUnstructuredAlignedGrid(grid, topomesh, magneticField, &
+            environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
+            ggoptions, ggtmdataopt=ggtmdata)
 
-    ! Generate the topological mesh
-    !==============================
-    call ConstructTopologicalMesh(environment%vessel, magneticField, &
-        topomeshoptions, topomesh, fieldtracer, vesseltracer, streamlinetracer)
+        ! With pinning off, a single pass
+        if (.not. ggoptions%pinstructureendpoints) exit
 
-    ! Generate the grid
-    !==================
-    call GenerateUnstructuredAlignedGrid(grid, topomesh, magneticField, &
-        environment%vessel, fieldtracer, vesseltracer, streamlinetracer, &
-        ggoptions, ggtmdataopt=ggtmdata)
+        ! Which structure endpoints are still beyond tolerance (measured along
+        ! the wall contour)? This reports ALL deficient endpoints.
+        call FindDeficientStructureEndpoints(grid, environment%vessel, &
+            ggoptions%pinstructureendpointstol, defx, defy)
+
+        ! RADIAL-ONLY pinning (the poloidal-fan path is disabled: it corrupted
+        ! the face labels and its inserted nodes did not survive). New deficient
+        ! endpoints are added to the radial list; endpoints already forced but
+        ! still deficient are the fan/grazing corners the radial path cannot
+        ! reach - reported as unpinnable, not retried, so the loop terminates.
+        allocate(newx(0), newy(0))
+        do ie = 1, size(defx)
+            if (size(ggoptions%forcedx) > 0) then
+                if (any((ggoptions%forcedx-defx(ie))**2 + &
+                        (ggoptions%forcedy-defy(ie))**2 < 1e-12_R8)) cycle
+            end if
+            newx = [newx, defx(ie)]; newy = [newy, defy(ie)]
+        end do
+
+        if (size(newx) == 0) then
+            print *, 'pinstructureendpoints: converged after', iter, &
+                'iteration(s);', size(ggoptions%forcedx), 'pinned;', size(defx), &
+                'endpoint(s) remain beyond tolerance (unpinnable fan/grazing)'
+            exit
+        end if
+
+        if (iter == pinmaxiter) then
+            print *, 'pinstructureendpoints: WARNING iteration cap reached;', &
+                size(defx), 'endpoint(s) still beyond tolerance'
+            exit
+        end if
+
+        ggoptions%forcedx = [ggoptions%forcedx, newx]
+        ggoptions%forcedy = [ggoptions%forcedy, newy]
+        print *, 'pinstructureendpoints: iteration', iter, '- forcing', &
+            size(newx), 'more surface(s) (total', size(ggoptions%forcedx), ')'
+        deallocate(newx, newy)
+
+    end do
 
     ! Write data
     !===========

@@ -122,7 +122,8 @@ module ggmod_gridgeneration2D
     public :: GenerateUnstructuredAlignedGrid, TranslateGridLabels, &
         ComputeTopologicalData, GetGridFaceLabelMappingGD, &
         ComputeVoidRegionPolygonSet, WriteVoidRegionFile, GGTMDataUDT, &
-        WriteVoidRegionFileGoat, UpdateVoidRegionCoordinates, ReadVoidRegionFileGoat
+        WriteVoidRegionFileGoat, UpdateVoidRegionCoordinates, ReadVoidRegionFileGoat, &
+        CollectStructureEndpoints, FindDeficientStructureEndpoints
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-10 ! relative field tolerance under which extrema are removed
@@ -773,6 +774,259 @@ module ggmod_gridgeneration2D
     !                     GRID GENERATION DRIVERS                      !
     !------------------------------------------------------------------!
 
+    ! Collect the unique endpoints of all vessel sub-structures. For a
+    ! closed contour made of several sub-structures these are the junction
+    ! points where consecutive sub-structures meet; they are the points at
+    ! which grid nodes should be pinned. Endpoints coinciding within dtol are
+    ! returned once.
+    subroutine CollectStructureEndpoints(vessel, ex, ey)
+
+        ! Arguments
+        type(VesselUDT), intent(in)             :: vessel
+        real(R8), allocatable, intent(out)      :: ex(:), ey(:)
+
+        ! Local
+        integer(I8)                             :: is, np, e
+        real(R8)                                :: px, py
+        real(R8), parameter                     :: dtol = 1e-6_R8
+
+        allocate(ex(0), ey(0))
+        do is = 1, vessel%nstructures
+            np = vessel%structures(is)%np
+            if (np < 2) cycle
+            do e = 1, 2
+                if (e == 1) then
+                    px = vessel%structures(is)%x(1)
+                    py = vessel%structures(is)%y(1)
+                else
+                    px = vessel%structures(is)%x(np)
+                    py = vessel%structures(is)%y(np)
+                end if
+                if (size(ex) > 0) then
+                    if (any((ex - px)**2 + (ey - py)**2 < dtol**2)) cycle
+                end if
+                ex = [ex, px]
+                ey = [ey, py]
+            end do
+        end do
+
+    end subroutine
+
+    ! Find structure endpoints whose nearest grid boundary node is farther
+    ! than 'tol' away MEASURED ALONG THE WALL CONTOUR, and that have not yet
+    ! been forced (present in alreadyx/alreadyy). These are the endpoints that
+    ! still need a flux surface forced through them. The along-contour distance
+    ! is measured only along sub-structures incident to the endpoint, so a node
+    ! that is Euclidean-close but around a corner (on a different sub-structure)
+    ! does NOT count as close.
+    subroutine FindDeficientStructureEndpoints(simgrid, vessel, tol, defx, defy)
+
+        ! Arguments
+        type(GridUDT), intent(in)               :: simgrid
+        type(VesselUDT), intent(in)             :: vessel
+        real(R8), intent(in)                    :: tol
+        real(R8), allocatable, intent(out)      :: defx(:), defy(:)
+
+        ! Local
+        real(R8), allocatable, dimension(:)     :: ex, ey, bx, by
+        real(R8)                                :: gap, perp, arc, total, arcP
+        real(R8)                                :: px, py
+        integer(I8)                             :: i, is, np, q
+        logical                                 :: atstart, atend
+        real(R8), parameter                     :: dtol = 1e-6_R8    ! endpoint coincidence
+        real(R8), parameter                     :: perptol = 1e-4_R8 ! node-on-substructure
+
+        allocate(defx(0), defy(0))
+
+        ! Grid boundary node coordinates (vertices of boundary faces)
+        call CollectBoundaryNodes(simgrid, bx, by)
+        if (size(bx) == 0) return
+
+        ! All structure endpoints
+        call CollectStructureEndpoints(vessel, ex, ey)
+
+        do i = 1, size(ex)
+            px = ex(i); py = ey(i)
+
+            ! Minimum along-contour distance from this endpoint to a boundary node
+            gap = huge(1.0_R8)
+            do is = 1, vessel%nstructures
+                np = vessel%structures(is)%np
+                if (np < 2) cycle
+                ! Is this endpoint the start or end of substructure `is`?
+                atstart = (vessel%structures(is)%x(1)-px)**2 + &
+                          (vessel%structures(is)%y(1)-py)**2 < dtol**2
+                atend   = (vessel%structures(is)%x(np)-px)**2 + &
+                          (vessel%structures(is)%y(np)-py)**2 < dtol**2
+                if (.not. (atstart .or. atend)) cycle
+                ! Project every boundary node onto this substructure polyline
+                do q = 1, size(bx)
+                    call ProjectOntoPolyline(bx(q), by(q), &
+                        vessel%structures(is)%x(1:np), &
+                        vessel%structures(is)%y(1:np), perp, arc, total)
+                    if (perp > perptol) cycle
+                    if (atstart) then
+                        arcP = arc
+                    else
+                        arcP = total - arc
+                    end if
+                    if (arcP < gap) gap = arcP
+                end do
+            end do
+
+            ! Deficient if no node within tol along the contour
+            if (gap > tol) then
+                defx = [defx, px]
+                defy = [defy, py]
+            end if
+        end do
+
+    contains
+
+        ! Perpendicular distance of (qx,qy) to polyline (px,py) and the
+        ! arc-length of the closest projection measured from the polyline start.
+        subroutine ProjectOntoPolyline(qx, qy, px, py, perp, arc, total)
+            real(R8), intent(in)  :: qx, qy, px(:), py(:)
+            real(R8), intent(out) :: perp, arc, total
+            integer(I8)           :: k
+            real(R8)              :: dx, dy, seglen2, seglen, t, projx, projy, d, cum
+            perp = huge(1.0_R8); arc = 0.0_R8; cum = 0.0_R8
+            do k = 1, size(px)-1
+                dx = px(k+1) - px(k)
+                dy = py(k+1) - py(k)
+                seglen2 = dx*dx + dy*dy
+                seglen  = sqrt(seglen2)
+                if (seglen2 > 0.0_R8) then
+                    t = ((qx-px(k))*dx + (qy-py(k))*dy)/seglen2
+                    t = max(0.0_R8, min(1.0_R8, t))
+                else
+                    t = 0.0_R8
+                end if
+                projx = px(k) + t*dx
+                projy = py(k) + t*dy
+                d = sqrt((qx-projx)**2 + (qy-projy)**2)
+                if (d < perp) then
+                    perp = d
+                    arc  = cum + t*seglen
+                end if
+                cum = cum + seglen
+            end do
+            total = cum
+        end subroutine
+
+    end subroutine
+
+    ! Collect unique coordinates of grid boundary-face vertices.
+    subroutine CollectBoundaryNodes(simgrid, bx, by)
+        type(GridUDT), intent(in)               :: simgrid
+        real(R8), allocatable, intent(out)      :: bx(:), by(:)
+        integer(I8)                             :: i
+        logical, allocatable                    :: isbnode(:)
+        allocate(isbnode(simgrid%vert%ntot))
+        isbnode = .false.
+        do i = 1, simgrid%face%ntot
+            if (simgrid%face%BF(i)) then
+                isbnode(simgrid%face%vert(i, 1)) = .true.
+                isbnode(simgrid%face%vert(i, 2)) = .true.
+            end if
+        end do
+        bx = pack(simgrid%vert%x, isbnode)
+        by = pack(simgrid%vert%y, isbnode)
+    end subroutine
+
+    ! Poloidal (fan) structure-endpoint pinning: for each requested endpoint,
+    ! insert a grid node onto the NON-ALIGNED wall boundary face that carries
+    ! it (a fan-gap face a flux surface cannot reach), splitting that face at
+    ! the endpoint's arclength. Runs in the grid phase before cell construction,
+    ! so the split propagates into the (arbitrary-polygon) fan cell. Only faces
+    ! that actually carry a requested endpoint mid-span are touched, so the
+    ! off/unforced path is unchanged.
+    subroutine PinPoloidalStructureEndpoints(grid, ggtmdata, topomesh, &
+        forcedx, forcedy, tol)
+
+        ! Arguments
+        class(GGGridUDT), intent(inout)         :: grid
+        class(GGTMDataUDT)                      :: ggtmdata
+        class(TopomeshUDT), intent(in)          :: topomesh
+        real(R8), intent(in)                    :: forcedx(:), forcedy(:), tol
+
+        ! Local
+        integer(I8)                             :: ic, i, bestface, nold, pos
+        real(R8)                                :: perp, arc, total, bestperp, &
+            bestarc, cx, cy
+        real(R8), allocatable, dimension(:)     :: newdlcv
+        integer(I8), allocatable, dimension(:)  :: newvert
+        logical, allocatable, dimension(:)      :: newisn
+        real(R8), parameter                     :: perptol = 5e-3_R8
+
+        associate(face => topomesh%face, facedata => ggtmdata%face)
+        do ic = 1, size(forcedx)
+            cx = forcedx(ic); cy = forcedy(ic)
+
+            ! Nearest non-aligned (radial, on-wall) boundary face carrying the
+            ! endpoint. Its own line vertices give the arclength coordinate.
+            bestface = 0; bestperp = huge(1.0_R8); bestarc = 0.0_R8
+            do i = 1, face%ntot
+                if (face%type(i) /= TMfacebndID) cycle
+                if (.not. allocated(facedata(i)%line%xv)) cycle
+                if (size(facedata(i)%line%xv) < 2) cycle
+                call ProjLine(cx, cy, facedata(i)%line%xv, facedata(i)%line%yv, &
+                    perp, arc, total)
+                if (perp < bestperp) then
+                    bestperp = perp; bestface = i; bestarc = arc
+                end if
+            end do
+            if (bestface == 0 .or. bestperp > perptol) cycle
+
+            ! Insert the endpoint into that face's line, PRESERVING all its
+            ! existing (radial-distribution) vertices - only ADD the new node.
+            ! Skip if a vertex already sits within tol (a node is there), or if
+            ! it would land on an endpoint of the line.
+            nold = size(facedata(bestface)%line%dlcv)
+            if (nold < 2) cycle
+            if (any(abs(facedata(bestface)%line%dlcv - bestarc) < tol)) cycle
+            if (bestarc <= facedata(bestface)%line%dlcv(1) .or. &
+                bestarc >= facedata(bestface)%line%dlcv(nold)) cycle
+            pos = count(facedata(bestface)%line%dlcv < bestarc)
+            newdlcv = [facedata(bestface)%line%dlcv(1:pos), bestarc, &
+                       facedata(bestface)%line%dlcv(pos+1:nold)]
+            newvert = [facedata(bestface)%line%vert(1:pos), grid%vert%ntot+1, &
+                       facedata(bestface)%line%vert(pos+1:nold)]
+            newisn  = [facedata(bestface)%line%isnodevert(1:pos), .false., &
+                       facedata(bestface)%line%isnodevert(pos+1:nold)]
+            call facedata(bestface)%line%AddVertexCoordinates(newdlcv)
+            call facedata(bestface)%line%AddVertexIDs(newvert, newisn)
+            grid%vert%ntot = grid%vert%ntot + 1
+            call facedata(bestface)%line%UpdateSegmentData(ggtmdata)
+            print *, 'PinPoloidalStructureEndpoints: inserted wall node at (', &
+                cx, ',', cy, ')'
+        end do
+        end associate
+
+    contains
+
+        subroutine ProjLine(qx, qy, px, py, perp, arc, total)
+            real(R8), intent(in)  :: qx, qy, px(:), py(:)
+            real(R8), intent(out) :: perp, arc, total
+            integer(I8)           :: k
+            real(R8)              :: dx, dy, L2, L, t, prx, pry, d, cum
+            perp = huge(1.0_R8); arc = 0.0_R8; cum = 0.0_R8
+            do k = 1, size(px)-1
+                dx = px(k+1)-px(k); dy = py(k+1)-py(k)
+                L2 = dx*dx + dy*dy; L = sqrt(L2)
+                t = 0.0_R8
+                if (L2 > 0.0_R8) t = max(0.0_R8, min(1.0_R8, &
+                    ((qx-px(k))*dx + (qy-py(k))*dy)/L2))
+                prx = px(k) + t*dx; pry = py(k) + t*dy
+                d = sqrt((qx-prx)**2 + (qy-pry)**2)
+                if (d < perp) then; perp = d; arc = cum + t*L; end if
+                cum = cum + L
+            end do
+            total = cum
+        end subroutine
+
+    end subroutine
+
     ! Unstructured aligned grid generator
     subroutine GenerateUnstructuredAlignedGrid(simgrid, topomesh, magneticField, &
         vessel, fieldtracer, boundarytracer, streamlinetracer, options, &
@@ -1063,6 +1317,14 @@ module ggmod_gridgeneration2D
         ! Add refinement data to contour lines
         call AddTopologicalMeshTubeContoursLineRefinementData(ggtmdata, &
             topomesh, vessel, options)
+
+        ! Poloidal (fan) structure-endpoint pinning: split the non-aligned wall
+        ! boundary faces carrying a requested endpoint, before cells are built
+        if (options%pinstructureendpoints .and. size(options%forcedxpol) > 0) then
+            call PinPoloidalStructureEndpoints(grid, ggtmdata, topomesh, &
+                options%forcedxpol, options%forcedypol, &
+                options%pinstructureendpointstol)
+        end if
 
         ! Generate elemental flux tubes for gridding
         call ConstructTopologicalMeshCellFluxTubes(grid, ggtmdata, topomesh, &
@@ -5374,7 +5636,13 @@ module ggmod_gridgeneration2D
         type(PolygonUDT), allocatable           :: polc(:)
 
         ! Diagnostics
-        real(R8)                                :: tstart, tend 
+        real(R8)                                :: tstart, tend
+
+        ! Structure-endpoint pinning
+        real(R8), allocatable, dimension(:)     :: fpsi, tubemin, tubemax, ptvp
+        integer(I8), allocatable, dimension(:)  :: ptgt, dfidx
+        real(R8)                                :: fpe, ddist, dbestp, fracp
+        integer(I8)                             :: ip, it, kbest, ntf2
 
         ! Loop
         integer(I8)                             :: i, j, k, cc
@@ -5403,8 +5671,52 @@ module ggmod_gridgeneration2D
         ! Initialize flux surface counter
         nfs = topomesh%nfs
 
+        ! Structure-endpoint pinning: assign each requested endpoint to the
+        ! tube whose distribution face both spans the endpoint's flux value and
+        ! lies nearest the endpoint. Inside the tube loop a distribution vertex
+        ! of that tube is moved onto the endpoint's flux value, so a flux
+        ! surface is traced through it (replacing the nearest existing one).
+        allocate(fpsi(0), ptgt(0))
+        if (options%pinstructureendpoints .and. size(options%forcedx) > 0) then
+            deallocate(fpsi, ptgt)
+            allocate(fpsi(size(options%forcedx)), ptgt(size(options%forcedx)))
+            allocate(tubemin(tube%ntot), tubemax(tube%ntot), dfidx(tube%ntot))
+            fpsi = fieldtracer%Evaluate(options%forcedx, options%forcedy)
+            ptgt = 0
+            tubemin = 0.0_R8; tubemax = 0.0_R8; dfidx = 0
+            do it = 1, tube%ntot
+                ntf2 = tubedata(it)%distributionface
+                if (ntf2 <= 0) cycle
+                if (.not. allocated(facedata(ntf2)%line%xv)) cycle
+                if (size(facedata(ntf2)%line%xv) < 2) cycle
+                dfidx(it) = ntf2
+                ptvp = fieldtracer%Evaluate(facedata(ntf2)%line%xv, &
+                    facedata(ntf2)%line%yv)
+                tubemin(it) = minval(ptvp)
+                tubemax(it) = maxval(ptvp)
+            end do
+            ! Assign each endpoint to the tube whose distribution face both
+            ! spans the endpoint's flux value AND passes nearest the endpoint
+            ! (min distance to any of its vertices -> the wall-adjacent tube,
+            ! whose radial line reaches the wall near the endpoint).
+            do ip = 1, size(fpsi)
+                dbestp = huge(1.0_R8)
+                do it = 1, tube%ntot
+                    if (dfidx(it) <= 0) cycle
+                    if (tubemax(it) <= tubemin(it)) cycle
+                    if (fpsi(ip) < tubemin(it) .or. fpsi(ip) > tubemax(it)) cycle
+                    ddist = minval((facedata(dfidx(it))%line%xv - options%forcedx(ip))**2 + &
+                                   (facedata(dfidx(it))%line%yv - options%forcedy(ip))**2)
+                    if (ddist < dbestp) then
+                        dbestp = ddist
+                        ptgt(ip) = it
+                    end if
+                end do
+            end do
+        end if
+
         ! Loop over all tubes
-        do i = 1, tube%ntot 
+        do i = 1, tube%ntot
 
             ! Initialize
             !-----------
@@ -5483,10 +5795,42 @@ module ggmod_gridgeneration2D
             end if 
             allocate(tfval(size(tx)))
             tfval = fieldtracer%Evaluate(tx, ty)
-            if (tfval(1) < tfval(size(tfval))) then 
+            if (tfval(1) < tfval(size(tfval))) then
                 tfval = tfval(size(tfval):1:-1)
                 dlcv = dlcv(size(dlcv):1:-1)
-            end if 
+            end if
+
+            ! Pin structure endpoints assigned to this tube: move the nearest
+            ! interior distribution vertex onto the endpoint's flux value (so a
+            ! flux surface is traced through it), replacing the surface it was
+            ! on rather than adding one. tfval/dlcv are aligned and monotonic.
+            if (options%pinstructureendpoints .and. size(ptgt) > 0 .and. &
+                size(tfval) > 2) then
+                do ip = 1, size(ptgt)
+                    if (ptgt(ip) /= i) cycle
+                    fpe = fpsi(ip)
+                    if (fpe <= minval(tfval) .or. fpe >= maxval(tfval)) cycle
+                    ! Nearest interior vertex in flux value
+                    kbest = 0
+                    dbestp = huge(1.0_R8)
+                    do k = 2, size(tfval)-1
+                        if (abs(tfval(k) - fpe) < dbestp) then
+                            dbestp = abs(tfval(k) - fpe)
+                            kbest = k
+                        end if
+                    end do
+                    if (kbest == 0) cycle
+                    ! Move it to the arclength where the flux value equals fpe
+                    if (tfval(kbest) > fpe .and. tfval(kbest+1) /= tfval(kbest)) then
+                        fracp = (fpe - tfval(kbest))/(tfval(kbest+1) - tfval(kbest))
+                        dlcv(kbest) = dlcv(kbest) + fracp*(dlcv(kbest+1) - dlcv(kbest))
+                    elseif (tfval(kbest) <= fpe .and. tfval(kbest-1) /= tfval(kbest)) then
+                        fracp = (fpe - tfval(kbest))/(tfval(kbest-1) - tfval(kbest))
+                        dlcv(kbest) = dlcv(kbest) + fracp*(dlcv(kbest-1) - dlcv(kbest))
+                    end if
+                    tfval(kbest) = fpe
+                end do
+            end if
 
             ! Eliminate values outside of bounds
             allocate(keepind(size(tfval)))
