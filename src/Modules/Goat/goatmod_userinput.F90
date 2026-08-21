@@ -795,8 +795,8 @@ module goatmod_userinput
         ! - (deprecated) avprefinevessel     switch to refine vessel boundaries, similar
         !                       to full vessel refinement (see vessel options)
         ! - (deprecated) avpmaxvesseldist    maximal vessel edge length
-        ! - (deprecated) avpminreffac        minimal refinement factor for vessel edge refinement                    
-        ! 
+        ! - (deprecated) avpminreffac        minimal refinement factor for vessel edge refinement
+        !
 
         integer(I8)             :: fresx, fresy, vresx, vresy, npmin, &
             npmax, avpminreffac
@@ -1002,7 +1002,7 @@ module goatmod_userinput
             extendtptubes, extendvesseltubes, refdlBLlengthbased, &
             radrefdlBLlengthbased, vdrdoxp, structurebasedlabels, &
             dogriddiagnostics, evtnoBL, refBLdostructure, &
-            forceSOLPStopology, vdrdosp
+            forceSOLPStopology, vdrdosp, pinstructureendpoints
         integer(I8)                 :: gcresx, gcresy, &
             verbosity, orthtracernsteps, refBLnctarget, refBLncvessel, &
             radrefBLncsp, refBLncstructure
@@ -1017,12 +1017,20 @@ module goatmod_userinput
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
             radrefLBLmininf, radrefLBLmaxinf, radrefLBLminsp, &
-            radrefLBLmaxsp, radrefLBdecaylengthsp, evtmaxvessellength
+            radrefLBLmaxsp, radrefLBdecaylengthsp, evtmaxvessellength, &
+            pinstructureendpointstol
+        ! forcedx/forcedy: runtime accumulator (NOT read from file) of the
+        ! structure-endpoint (R,Z) locations pinned RADIALLY (a flux surface
+        ! through the point, in tube-contour tracing). forcedxpol/forcedypol:
+        ! the same but pinned POLOIDALLY (a boundary node inserted on the wall
+        ! face at the point) for fan/grazing corners a flux surface can't reach.
+        ! The driver appends to these each pinning iteration.
         real(R8), allocatable, dimension(:)     :: vdpdx, vdpdy, vdpdd, &
             vdpdval, refLBLminstructure, refLBLminvert, refLBLmaxstructure, &
             refLBLmaxvert, refLBdecaylengthstructure, refLBdecaylengthvert, &
             refBLdltarget, refBLdlvessel, radrefBLdlsp, vdrdx, vdrdy, &
-            vdrdd, vdrdval, refBLdlstructure
+            vdrdd, vdrdval, refBLdlstructure, forcedx, forcedy, &
+            forcedxpol, forcedypol
         character(:), allocatable   :: vdptype, vdpdtype, vdrtype, &
             vdrdtype, rembndtriacriterion, remfacescriterion, ggmethod, &
             cellconstructionmethod, TMcellgriddingorder, refmeth, vdpplftype, &
@@ -1445,7 +1453,7 @@ module goatmod_userinput
 
         ! Adaptations
         options%doadaptations               = .true.
-        options%addcoreboundaries           = .true. 
+        options%addcoreboundaries           = .true.
         options%coreboundariesfrac          = 0.2
         options%addPFboundaries             = .true. 
         options%PFboundariesfrac            = 0.2
@@ -1590,11 +1598,18 @@ module goatmod_userinput
         options%evtmaxvessellength  = 0.2
         options%evtnoBL             = .true.
 
-        ! Options for flux surface removal 
+        ! Options for flux surface removal
         options%removefluxsurfaces = .true.
-        options%remfspsitol = 1e-4 
-        options%remfspsirattol = 1e-1 
-        
+        options%remfspsitol = 1e-4
+        options%remfspsirattol = 1e-1
+
+        ! Structure-endpoint pinning (off by default; the forced-endpoint list
+        ! starts empty and is filled by the grid-generation driver loop)
+        options%pinstructureendpoints    = .false.
+        options%pinstructureendpointstol = 2e-3_R8
+        allocate(options%forcedx(0), options%forcedy(0))
+        allocate(options%forcedxpol(0), options%forcedypol(0))
+
         ! Options for boundary triangle removal
         options%removenarrowboundarytriangles = .true. 
         options%rembndtriacriterion = 'angle' 
@@ -2768,14 +2783,20 @@ module goatmod_userinput
         field = 'gg.adap.evt.noBL'
         call ExtractOptionValuelogical0D(fid, field, options%evtnoBL)
 
-        ! Options for flux surface removal 
+        ! Options for flux surface removal
         field = 'gg.vd.removefluxsurfaces'
         call ExtractOptionValueLogical0D(fid, field, options%removefluxsurfaces)
         field = 'gg.vd.rfs.mark.psitol'
         call ExtractOptionValueReal0D(fid, field, options%remfspsitol)
         field = 'gg.vd.rfs.mark.psirattol'
         call ExtractOptionValueReal0D(fid, field, options%remfspsirattol)
-        
+
+        ! Structure-endpoint pinning
+        field = 'gg.pinstructureendpoints'
+        call ExtractOptionValueLogical0D(fid, field, options%pinstructureendpoints)
+        field = 'gg.pinstructureendpoints.tol'
+        call ExtractOptionValueReal0D(fid, field, options%pinstructureendpointstol)
+
         ! Options for boundary triangle removal
         field = 'gg.vd.removenarrowboundarytriangles'
         call ExtractOptionValueLogical0D(fid, field, options%removenarrowboundarytriangles)
