@@ -1027,6 +1027,249 @@ module ggmod_gridgeneration2D
 
     end subroutine
 
+    ! Fan/grazing structure-endpoint pinning by native boundary-cell splitting.
+    ! For each requested endpoint that no grid boundary node reaches within tol
+    ! (the divertor fan corners, which no flux surface can reach), a real grid
+    ! node is added ON the wall at the endpoint: the carrying boundary face is
+    ! split (A-corner, corner-B), the corner is inserted into the adjacent cell's
+    ! vertex loop (GOAT cells are arbitrary polygons, so the cell simply hugs the
+    ! wall through the corner - no separate spoke needed), and the corner is
+    ! inserted into the ggtmdata boundary line so MapVertexPairToFace still finds
+    ! the (now split) faces at label time (this consistency is what the earlier
+    ! attempts lacked -> label explosion). Runs on the GGGridUDT after
+    ! ConstructCellsQuadTria; ExtractSimulationGrid copies the grid verbatim, so
+    ! the corner survives. Each corner is only committed if its line insert
+    ! succeeds, keeping the grid and ggtmdata consistent.
+    subroutine PinFanCorners(grid, ggtmdata, topomesh, forcedx, forcedy, tol)
+
+        ! Arguments
+        class(GGGridUDT), intent(inout)         :: grid
+        type(GGTMDataUDT), intent(inout)        :: ggtmdata
+        class(TopomeshUDT), intent(in)          :: topomesh
+        real(R8), intent(in)                    :: forcedx(:), forcedy(:), tol
+
+        ! Grid snapshot (refreshed before every corner, so a corner that shares
+        ! a wall face with an already-pinned neighbour sees the split sub-face)
+        real(R8), allocatable, dimension(:)     :: vx, vy
+        integer(I8), allocatable, dimension(:)  :: fv1, fv2, flbl, freg, &
+            cvert, cvp1, cvp2, creg
+        integer(I8)                             :: nvert, nface, ncell
+        logical, allocatable, dimension(:)      :: iswall
+
+        ! Per-corner cell rebuild
+        integer(I8), allocatable, dimension(:)  :: newloop, rot
+
+        ! Local
+        integer(I8)                             :: ic, f, c, av, bv, lbl, vid, &
+            m, lb, k, bestf, npin, pv
+        real(R8)                                :: cx, cy, perp, t, bestperp, &
+            dmin, seglen, bestseglen
+
+        ! A corner is accepted onto its nearest interior wall face only if its
+        ! perpendicular offset is small both in absolute terms and relative to
+        ! that face's length. Genuine wall junctions (even ones where the wall
+        ! bends off the grid chord) sit at ratio < 0.3 and perp < ~7 mm here;
+        ! apex/X-point corners project at ratio > 4 and perp > 25 mm and are
+        ! rejected (they already sit on a node in practice).
+        real(R8), parameter                     :: perptol = 1.5e-2_R8
+        real(R8), parameter                     :: perpratio = 0.5_R8
+
+        npin = 0
+
+        ! One corner at a time. Each pinned corner mutates the grid (a new
+        ! vertex, the wall face split in two, the adjacent cell rebuilt to hug
+        ! it) and the ggtmdata boundary line, so the snapshot is retaken at the
+        ! top of every pass.
+        do ic = 1, size(forcedx)
+            cx = forcedx(ic); cy = forcedy(ic)
+
+            ! (Re)snapshot the current grid
+            vx  = grid%vert%x%Get();  vy = grid%vert%y%Get()
+            fv1 = grid%face%v1%Get(); fv2 = grid%face%v2%Get()
+            flbl = grid%face%label%Get(); freg = grid%face%region%Get()
+            cvert = grid%cell%vert%Get()
+            cvp1 = grid%cell%vp1%Get(); cvp2 = grid%cell%vp2%Get()
+            creg = grid%cell%region%Get()
+            nvert = size(vx); nface = size(fv1); ncell = size(cvp1)
+
+            ! Wall faces (non-aligned or aligned boundary)
+            if (allocated(iswall)) deallocate(iswall)
+            allocate(iswall(nface)); iswall = .false.
+            do f = 1, nface
+                if (flbl(f) >= 1 .and. flbl(f) <= topomesh%face%ntot) then
+                    if (topomesh%face%type(flbl(f)) == TMfacebndID .or. &
+                        topomesh%face%type(flbl(f)) == TMfacealbndID) iswall(f) = .true.
+                end if
+            end do
+
+            ! Already reached by a wall node within tol? -> nothing to do
+            dmin = huge(1.0_R8)
+            do f = 1, nface
+                if (.not. iswall(f)) cycle
+                dmin = min(dmin, hypot(vx(fv1(f))-cx, vy(fv1(f))-cy), &
+                                 hypot(vx(fv2(f))-cx, vy(fv2(f))-cy))
+            end do
+            if (dmin < tol) cycle
+
+            ! Wall face whose segment the corner lies on (interior)
+            bestf = 0; bestperp = huge(1.0_R8); bestseglen = 0.0_R8
+            do f = 1, nface
+                if (.not. iswall(f)) cycle
+                call SegProj(cx, cy, vx(fv1(f)), vy(fv1(f)), vx(fv2(f)), &
+                    vy(fv2(f)), perp, t)
+                if (t <= 0.02_R8 .or. t >= 0.98_R8) cycle
+                if (perp < bestperp) then
+                    bestperp = perp; bestf = f
+                    bestseglen = hypot(vx(fv2(f))-vx(fv1(f)), vy(fv2(f))-vy(fv1(f)))
+                end if
+            end do
+            if (bestf == 0) cycle
+            if (bestperp > perptol .or. bestperp > perpratio*bestseglen) cycle
+            f = bestf; av = fv1(f); bv = fv2(f); lbl = flbl(f)
+
+            ! Adjacent cell (one containing edge av-bv); only tri/quad handled
+            c = FindCell(av, bv)
+            if (c == 0) cycle
+            if (cvp2(c) > 4) cycle
+
+            ! Insert the corner into the ggtmdata boundary line FIRST; only
+            ! proceed with the grid split if that succeeds (keeps them in sync)
+            vid = nvert + 1
+            if (.not. InsertCornerInLine(lbl, av, bv, vid, cx, cy)) cycle
+
+            ! Commit immediately. Add the new vertex and the two wall sub-faces
+            ! (both keep the wall label/region); split the wall face; rebuild
+            ! the adjacent cell to route through the corner. Add before remove
+            ! so cell/face references stay valid, then compact.
+            call grid%AddVert([cx], [cy], [0_I8])
+            grid%vert%ntot = grid%vert%x%Size()
+            lb = cvp1(c); m = cvp2(c)
+
+            ! Adjacent cell loop with the corner spliced in on the wall edge
+            allocate(newloop(0))
+            do k = 1, m
+                newloop = [newloop, cvert(lb + k - 1)]
+                if ((cvert(lb+k-1) == av .and. cvert(lb+mod(k,m)) == bv) .or. &
+                    (cvert(lb+k-1) == bv .and. cvert(lb+mod(k,m)) == av)) then
+                    newloop = [newloop, vid]
+                end if
+            end do
+
+            ! Split the wall face in two
+            call grid%AddFace(reshape([av, vid, vid, bv], [2, 2]), &
+                [lbl, lbl], [freg(f), freg(f)])
+
+            if (size(newloop) <= 4) then
+                ! Triangle -> quad: one cell, no interior face
+                call grid%AddCell(newloop, &
+                    reshape([1_I8, int(size(newloop), I8)], [1, 2]), [creg(c)])
+            else
+                ! Quad -> pentagon is unsupported downstream (SplitNonConvexCells
+                ! only handles <=4 verts). Split into a triangle + quad along a
+                ! diagonal from the corner. That diagonal is interior in every
+                ! case: the only possible reflex vertex of the pentagon is the
+                ! corner itself, and diagonals from a reflex vertex stay inside.
+                ! Add it as an interior face (label 0, cell region).
+                pv = findloc(newloop == vid, .true., 1)
+                rot = [newloop(pv:), newloop(1:pv-1)]   ! rot(1) == vid
+                call grid%AddCell([rot(1), rot(2), rot(3)], &
+                    reshape([1_I8, 3_I8], [1, 2]), [creg(c)])
+                call grid%AddCell([rot(1), rot(3), rot(4), rot(5)], &
+                    reshape([1_I8, 4_I8], [1, 2]), [creg(c)])
+                call grid%AddFace(reshape([rot(1), rot(3)], [1, 2]), &
+                    [0_I8], [creg(c)])
+                deallocate(rot)
+            end if
+            deallocate(newloop)
+
+            call RemoveGGCell(grid, [c])
+            call RemoveGGFace(grid, [f])
+            npin = npin + 1
+            print *, 'PinFanCorners: pinned endpoint at (', cx, ',', cy, ')'
+        end do
+        print *, 'PinFanCorners: fan/grazing endpoints pinned =', npin
+
+    contains
+
+        ! Perpendicular distance of (px,py) to segment (x1,y1)-(x2,y2) and the
+        ! normalised projection parameter t in [0,1].
+        subroutine SegProj(px, py, x1, y1, x2, y2, perp, t)
+            real(R8), intent(in)  :: px, py, x1, y1, x2, y2
+            real(R8), intent(out) :: perp, t
+            real(R8)              :: dx, dy, L2
+            dx = x2 - x1; dy = y2 - y1; L2 = dx*dx + dy*dy
+            if (L2 <= 0.0_R8) then
+                t = 0.0_R8; perp = hypot(px-x1, py-y1); return
+            end if
+            t = ((px-x1)*dx + (py-y1)*dy)/L2
+            t = max(0.0_R8, min(1.0_R8, t))
+            perp = hypot(px - (x1+t*dx), py - (y1+t*dy))
+        end subroutine
+
+        ! A cell whose vertex loop contains the consecutive edge {u,w}; 0 if none
+        function FindCell(u, w) result(ci)
+            integer(I8), intent(in) :: u, w
+            integer(I8)             :: ci, cc2, lb2, m2, p2, a1, a2
+            ci = 0
+            do cc2 = 1, ncell
+                lb2 = cvp1(cc2); m2 = cvp2(cc2)
+                do p2 = 1, m2
+                    a1 = cvert(lb2 + p2 - 1); a2 = cvert(lb2 + mod(p2, m2))
+                    if ((a1 == u .and. a2 == w) .or. (a1 == w .and. a2 == u)) then
+                        ci = cc2; return
+                    end if
+                end do
+            end do
+        end function
+
+        ! Insert vertex vid at (cx,cy) into the ggtmdata line of topomesh face
+        ! L, between its consecutive vertices A and B. Returns .false. (no
+        ! change) if A,B are not a consecutive pair on that line.
+        function InsertCornerInLine(L, A, B, vid, cx, cy) result(ok)
+            integer(I8), intent(in) :: L, A, B, vid
+            real(R8), intent(in)    :: cx, cy
+            logical                 :: ok
+            integer(I8)             :: n, pp, q
+            real(R8)                :: fr2
+            real(R8), allocatable   :: ndlcv(:)
+            integer(I8), allocatable:: nvert2(:)
+            logical, allocatable    :: nisn(:)
+            ok = .false.
+            if (L < 1 .or. L > size(ggtmdata%face)) return
+            if (.not. allocated(ggtmdata%face(L)%line%vert)) return
+            n = size(ggtmdata%face(L)%line%vert)
+            if (n < 2 .or. .not. allocated(ggtmdata%face(L)%line%dlcv)) return
+            pp = 0
+            do q = 1, n-1
+                if ((ggtmdata%face(L)%line%vert(q) == A .and. &
+                     ggtmdata%face(L)%line%vert(q+1) == B) .or. &
+                    (ggtmdata%face(L)%line%vert(q) == B .and. &
+                     ggtmdata%face(L)%line%vert(q+1) == A)) then
+                    pp = q; exit
+                end if
+            end do
+            if (pp == 0) return
+            fr2 = hypot(cx - vx(A), cy - vy(A)) / max(hypot(vx(B)-vx(A), &
+                vy(B)-vy(A)), 1e-30_R8)
+            associate(ln => ggtmdata%face(L)%line)
+            if (ln%vert(pp) == A) then
+                ndlcv = [ln%dlcv(1:pp), ln%dlcv(pp)+fr2*(ln%dlcv(pp+1)-ln%dlcv(pp)), &
+                         ln%dlcv(pp+1:n)]
+            else
+                ndlcv = [ln%dlcv(1:pp), ln%dlcv(pp)+(1.0_R8-fr2)*(ln%dlcv(pp+1)-ln%dlcv(pp)), &
+                         ln%dlcv(pp+1:n)]
+            end if
+            nvert2 = [ln%vert(1:pp), vid, ln%vert(pp+1:n)]
+            nisn   = [ln%isnodevert(1:pp), .false., ln%isnodevert(pp+1:n)]
+            call ln%AddVertexCoordinates(ndlcv)
+            call ln%AddVertexIDs(nvert2, nisn)
+            call ln%UpdateSegmentData(ggtmdata)
+            end associate
+            ok = .true.
+        end function
+
+    end subroutine
+
     ! Unstructured aligned grid generator
     subroutine GenerateUnstructuredAlignedGrid(simgrid, topomesh, magneticField, &
         vessel, fieldtracer, boundarytracer, streamlinetracer, options, &
@@ -1387,6 +1630,15 @@ module ggmod_gridgeneration2D
                 'unknown cell construction method: ' // options%cellconstructionmethod)
 
         end select
+
+        ! Pin fan/grazing structure endpoints (those no flux surface can reach)
+        ! by native boundary-cell splitting on the built grid, before non-convex
+        ! splitting cleans up any resulting concave cell. Only endpoints still
+        ! farther than tol from a wall node are touched.
+        if (options%pinstructureendpoints .and. size(options%forcedx) > 0) then
+            call PinFanCorners(grid, ggtmdata, topomesh, options%forcedx, &
+                options%forcedy, options%pinstructureendpointstol)
+        end if
 
         ! Write intermediate file
         call grid%WriteData('grid_after_cellconstruction')
