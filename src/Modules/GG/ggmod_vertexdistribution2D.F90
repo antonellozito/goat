@@ -151,16 +151,39 @@ module ggmod_vertexdistribution2D
         ! Finally, we note that here, the coefficients will immediately include the
         ! product prefactor (i.e. we cosider b_i = a_i prod( 1/(x_i - x_m) ) )
 
-        integer(I8)                                     :: order 
+        integer(I8)                                     :: order
         class(DistributionFunctionUDT), allocatable     :: densityfunction
         real(R8), allocatable, dimension(:)             :: xi
         real(R8), allocatable, dimension(:, :)          :: lagcoef, intlagcoef
-        character(:), allocatable                       :: lengthtype 
-        type(MagneticFieldUDT)                          :: field 
+        character(:), allocatable                       :: lengthtype
+        type(MagneticFieldUDT)                          :: field
 
         real(R8)                        :: d, fd
 
-    contains 
+        ! Independent CORE radial-density scaling (added for topology-aware
+        ! gridding). When corescale is .true., the density used to place radial
+        ! vertices is multiplied by corefactor at every sample point INSIDE the
+        ! separatrix (normalised flux rho = sqrt((psi-psiaxis)/(psisep-psiaxis))
+        ! < 1). This lets the confined-core radial resolution be dialed down for
+        ! double-null grids without touching the SOL, so the topologically
+        ! identical core grids the same as the single-null case. Default off
+        ! (corescale=.false., corefactor=1) => byte-identical to before.
+        logical                         :: corescale = .false.
+        real(R8)                        :: corefactor = 1.0_R8
+        ! Private-flux-region radial factor, applied INDEPENDENTLY of the core:
+        ! the PFRs have flux on the core side (rho < 1) too but lie BEYOND the
+        ! X-points in Z, so they are scaled by pfrfactor (not corefactor). This
+        ! decouples the PFR radial resolution from both the core and the SOL.
+        real(R8)                        :: pfrfactor = 1.0_R8
+        ! SOL radial factor (rho >= 1), independent of the core and the PFR.
+        real(R8)                        :: solfactor = 1.0_R8
+        real(R8)                        :: psiaxis = 0.0_R8, psisep = 1.0_R8
+        ! Confined-core vertical band = [min, max] Z of the X-points; rho < 1
+        ! inside the band is the confined core, rho < 1 outside it is a PFR.
+        real(R8)                        :: corezmin = -1.0e30_R8
+        real(R8)                        :: corezmax = 1.0e30_R8
+
+    contains
 
         ! Distribution over given coordinates
         procedure :: DistributeOverCurve    => DistributeVerticesDensityBasedOverCurve
@@ -314,7 +337,8 @@ module ggmod_vertexdistribution2D
 
     ! Density-based vertex distributor
     function ConstructDensityBasedVertexDistributor(distribution, order, &
-        lengthtype, field) result(vd)
+        lengthtype, field, corefactor, psiaxis, psisep, corezmin, corezmax, &
+        pfrfactor, solfactor) result(vd)
 
         ! Description
         !============
@@ -328,13 +352,19 @@ module ggmod_vertexdistribution2D
         ! Declare variables
         !==================
         ! Arguments
-        type(DensityBasedVertexDistributor2DUDT)  :: vd 
+        type(DensityBasedVertexDistributor2DUDT)  :: vd
         class(DistributionFunctionUDT), intent(in)  :: distribution
         integer(I8), intent(in)                     :: order
-        character(*), intent(in)                    :: lengthtype 
-        type(MagneticFieldUDT), intent(in)          :: field 
+        character(*), intent(in)                    :: lengthtype
+        type(MagneticFieldUDT), intent(in)          :: field
+        ! Optional independent CORE radial-density scaling (see the type). When
+        ! corefactor is present and /= 1, corescale is enabled and the density is
+        ! scaled by corefactor inside the separatrix (needs psiaxis, psisep).
+        real(R8), intent(in), optional              :: corefactor, psiaxis, psisep
+        real(R8), intent(in), optional              :: corezmin, corezmax, pfrfactor
+        real(R8), intent(in), optional              :: solfactor
 
-        
+
         ! Loop
         integer(I8)                                 :: k
 
@@ -343,8 +373,21 @@ module ggmod_vertexdistribution2D
         ! Set some fields
         vd%order = order
         vd%densityfunction = distribution
-        vd%lengthtype = lengthtype 
-        vd%field = field 
+        vd%lengthtype = lengthtype
+        vd%field = field
+
+        ! Optional independent core / PFR radial scaling
+        if (present(corefactor)) then
+            vd%corefactor = corefactor
+            if (present(pfrfactor)) vd%pfrfactor = pfrfactor
+            if (present(solfactor)) vd%solfactor = solfactor
+            if (present(psiaxis)) vd%psiaxis = psiaxis
+            if (present(psisep)) vd%psisep = psisep
+            if (present(corezmin)) vd%corezmin = corezmin
+            if (present(corezmax)) vd%corezmax = corezmax
+            vd%corescale = (vd%corefactor /= 1.0_R8) .or. (vd%pfrfactor /= 1.0_R8) &
+                .or. (vd%solfactor /= 1.0_R8)
+        end if
 
         ! Construct the lagrangian basis functions
         vd%xi = real([(k, k = 0, vd%order)], kind=R8)/(real(vd%order, kind=R8))
@@ -628,7 +671,7 @@ module ggmod_vertexdistribution2D
         ! Auxiliary
         real(R8)                            :: l, Mtot
         real(R8), allocatable, dimension(:) :: dx, dy, dl, distr, temp, &
-            Mi, Mdistr, dll, dllc, dlc, bx, by, bn, xf, yf
+            Mi, Mdistr, dll, dllc, dlc, bx, by, bn, xf, yf, cscl
         real(R8), allocatable, dimension(:, :)  :: xi, yi, rhoi 
         integer(I8), allocatable, dimension(:)  :: pxi
 
@@ -679,6 +722,35 @@ module ggmod_vertexdistribution2D
         allocate(temp(size(xi)))
         call rho%Evaluate(reshape(xi, [size(xi)]), reshape(yi, [size(yi)]), temp)
         rhoi = reshape(temp, [size(xi, 1), size(xi, 2)])
+
+        ! Independent CORE radial-density scaling: multiply the density by
+        ! corefactor at every sample point inside the separatrix (normalised flux
+        ! < 1), leaving the SOL untouched. Reuses vd%field's psi interpolant.
+        ! Off by default (corescale=.false.) so all existing grids are unchanged.
+        if (vd%corescale) then
+            call vd%field%interp%Evaluate(reshape(xi, [size(xi)]), &
+                reshape(yi, [size(yi)]), 0, 0, temp)
+            ! Independent radial scaling by region (all flux on the core side,
+            ! rho < 1, is split by the X-point vertical band):
+            !   confined core (inside the band) -> corefactor
+            !   private flux regions (outside the band) -> pfrfactor
+            !   SOL (rho >= 1) -> untouched
+            ! so the core and PFR resolutions are decoupled from each other and
+            ! from the SOL.
+            allocate(cscl(size(temp)))
+            where ((temp - vd%psiaxis) / (vd%psisep - vd%psiaxis) < 1.0_R8)
+                where ((reshape(yi, [size(yi)]) >= vd%corezmin) .and. &
+                       (reshape(yi, [size(yi)]) <= vd%corezmax))
+                    cscl = vd%corefactor        ! confined core
+                elsewhere
+                    cscl = vd%pfrfactor         ! private flux region
+                end where
+            elsewhere
+                cscl = vd%solfactor             ! SOL
+            end where
+            rhoi = rhoi * reshape(cscl, [size(xi, 1), size(xi, 2)])
+            deallocate(cscl)
+        end if
         pxi = [(k, k = 0, vd%order)]
 
         ! Compute number of vertices

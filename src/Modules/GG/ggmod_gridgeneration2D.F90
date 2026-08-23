@@ -1316,6 +1316,11 @@ module ggmod_gridgeneration2D
         real(R8), allocatable, dimension(:)         :: xp, yp, dp, valp
         integer(I8)                 :: resx, resy
         integer(I8), allocatable, dimension(:)  :: xpind, spind
+        ! Independent core radial-density scaling (topology-aware gridding):
+        ! flux at the magnetic axis and the primary separatrix (X-point)
+        integer(I8), allocatable, dimension(:)  :: pxpind_cs, xpind_cs
+        real(R8)                                :: psiaxis_cs, psisep_cs
+        real(R8)                                :: psival_cs(1)
         type(GGTMDataUDT)           :: ggtmdata 
         class(VertexDistributor2DUDT), allocatable      :: &
             poloidalvertexdistributor, radialvertexdistributor
@@ -1502,9 +1507,41 @@ module ggmod_gridgeneration2D
             call vdrdensityfunction%Visualize(xb, yb, resx, resy, &
                 'gg_vd_radialdensityfunction')
 
-            ! Construct density based distribution function
-            radialvertexdistributor = ConstructDensityBasedVertexDistributor(&
-                vdrdensityfunction, 1_I8, 'radial', magneticField)
+            ! Construct density based distribution function. When the CORE radial
+            ! density factor is set (/= 1), pass it together with the axis/primary-
+            ! separatrix flux so the distributor scales the density inside the
+            ! separatrix only (topology-aware core resolution; default 1 = off).
+            if (options%vdrdcorefactor /= 1.0_R8 .or. options%vdrdpfrfactor /= 1.0_R8 &
+                .or. options%vdrdsolfactor /= 1.0_R8) then
+                ! primary-separatrix flux = flux at a primary X-point
+                pxpind_cs = topomesh%GetPrimaryXPointIDs()
+                call magneticField%interp%Evaluate( &
+                    [topomesh%vert%x(pxpind_cs(1))], &
+                    [topomesh%vert%y(pxpind_cs(1))], 0, 0, psival_cs)
+                psisep_cs = psival_cs(1)
+                ! magnetic-axis-side flux: flux at the CENTROID of all X-points
+                ! (for a double null the distinct nulls straddle the confined core,
+                ! so the centroid lies inside it and (psisep - psiaxis) has the
+                ! right sign). The confined-core vertical band is [min, max] X-point
+                ! Z; rho < 1 inside it is the core, outside it a private flux region.
+                xpind_cs = topomesh%GetXPointIDs()
+                call magneticField%interp%Evaluate( &
+                    [sum(topomesh%vert%x(xpind_cs)) / real(size(xpind_cs), R8)], &
+                    [sum(topomesh%vert%y(xpind_cs)) / real(size(xpind_cs), R8)], &
+                    0, 0, psival_cs)
+                psiaxis_cs = psival_cs(1)
+                radialvertexdistributor = ConstructDensityBasedVertexDistributor(&
+                    vdrdensityfunction, 1_I8, 'radial', magneticField, &
+                    corefactor=options%vdrdcorefactor, &
+                    pfrfactor=options%vdrdpfrfactor, &
+                    solfactor=options%vdrdsolfactor, &
+                    psiaxis=psiaxis_cs, psisep=psisep_cs, &
+                    corezmin=minval(topomesh%vert%y(xpind_cs)), &
+                    corezmax=maxval(topomesh%vert%y(xpind_cs)))
+            else
+                radialvertexdistributor = ConstructDensityBasedVertexDistributor(&
+                    vdrdensityfunction, 1_I8, 'radial', magneticField)
+            end if
 
             ! Housekeeping
             end associate
