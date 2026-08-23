@@ -1011,7 +1011,8 @@ module goatmod_userinput
             vdpddecaylengthxp, vdpddensityatvessel, vdpddensityatxp, &
             vdpddensityatinf, vdrdfieldwidth, vdrdfacelength, &
             vdrddecaylengthxp, vdrddensityatxp, vdrddensityatinf, &
-            vdrddecaylengthsp, vdrddensityatsp, &
+            vdrddecaylengthsp, vdrddensityatsp, vdrdcorefactor, vdrdpfrfactor, &
+            vdrdsolfactor, &
             remfspsitol, remfspsirattol, rembndtriaminangle, &
             remfacesminlength, refLBLmininf, refLBLmaxinf, refLBLminxp, &
             refLBLmaxxp, refLBdecaylengthxp, orthtracerstep, &
@@ -1580,6 +1581,17 @@ module goatmod_userinput
         options%vdrddensityatinf    = 250.0_R8
         options%vdrddecaylengthsp   = 0.1_R8
         options%vdrddensityatsp     = 1000.0_R8
+        ! Independent CORE radial-density factor (1 = off): scales the radial
+        ! density inside the separatrix so the confined-core radial resolution can
+        ! be set independently of the SOL (topology-aware gridding).
+        options%vdrdcorefactor      = 1.0_R8
+        ! Independent PRIVATE-FLUX-REGION radial-density factor (1 = off): scales
+        ! the radial density on the core flux side but beyond the X-points, so the
+        ! PFR radial resolution is decoupled from both the core and the SOL.
+        options%vdrdpfrfactor       = 1.0_R8
+        ! Independent SOL radial-density factor (1 = off): scales the radial
+        ! density outside the separatrix (rho >= 1).
+        options%vdrdsolfactor       = 1.0_R8
         options%vdrdoxp             = .false.
         options%vdrdosp             = .true.
 
@@ -2746,6 +2758,12 @@ module goatmod_userinput
         call ExtractOptionValueReal0D(fid, field, options%vdrddecaylengthsp)
         field = 'gg.vd.rd.distribution.densityatsp'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatsp)
+        field = 'gg.vd.rd.distribution.corefactor'
+        call ExtractOptionValueReal0D(fid, field, options%vdrdcorefactor)
+        field = 'gg.vd.rd.distribution.pfrfactor'
+        call ExtractOptionValueReal0D(fid, field, options%vdrdpfrfactor)
+        field = 'gg.vd.rd.distribution.solfactor'
+        call ExtractOptionValueReal0D(fid, field, options%vdrdsolfactor)
         field = 'gg.vd.rd.distribution.densityatinf'
         call ExtractOptionValueReal0D(fid, field, options%vdrddensityatinf)
         field = 'gg.vd.rd.distribution.points.x'
