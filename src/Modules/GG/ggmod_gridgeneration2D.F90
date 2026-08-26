@@ -18239,7 +18239,8 @@ module ggmod_gridgeneration2D
         ! Module variables
         use mod_definitions, only: targetID, coreID, outerboundaryID, &
             vesselID
-        use ggmod_solpsregions, only: SetSOLPSRegionsLIM
+        use ggmod_solpsregions, only: SetSOLPSRegionsLIM, &
+            SetSOLPSRegionsSN
 
         ! Arguments
         type(VesselUDT), intent(in)                 :: vessel
@@ -18935,9 +18936,17 @@ module ggmod_gridgeneration2D
         ! Catalog-specific SOLPS region conventions: for recognized
         ! catalog topologies, overwrite the generic remapping above
         ! with the region numbering SOLPS expects.
-        ! Currently implemented: LIM.
+        ! Currently implemented: LIM, SN (lower/upper).
         if (trim(simgrid%data%SOLPStopologylabel) == 'LIM') then
             call SetSOLPSRegionsLIM(simgrid, topomesh, vessel)
+        elseif (trim(simgrid%data%SOLPStopologylabel) == &
+            'SN_lower') then
+            call SetSOLPSRegionsSN(simgrid, topomesh, vessel, &
+                .false.)
+        elseif (trim(simgrid%data%SOLPStopologylabel) == &
+            'SN_upper') then
+            call SetSOLPSRegionsSN(simgrid, topomesh, vessel, &
+                .true.)
         end if
 
     end subroutine
