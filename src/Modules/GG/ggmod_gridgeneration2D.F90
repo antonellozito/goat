@@ -13830,6 +13830,13 @@ module ggmod_gridgeneration2D
             valpLmin, valpLmax, decaylength, xv, yv, tempLmin, tempLmax, &
             tempdecaylength
         type(Coordinates2DDistanceDFUDT)            :: Lmin, Lmax
+        integer(I8), allocatable, dimension(:)      :: effIDs
+        real(R8), allocatable, dimension(:)         :: effLmin, &
+            effLmax, effdec
+        integer(I8)                                 :: nbelow, nabove
+        logical                                     :: dovesseleff
+        character(len=64)                           :: catalabel, &
+            cataorient
 
         ! Loop
         integer(I8)                                 :: i 
@@ -13931,8 +13938,54 @@ module ggmod_gridgeneration2D
                     end do 
                 end if 
 
+                ! Effective structure refinement lists: start from
+                ! the user's gg.ref.LB.structureIDs input
+                effIDs = options%refLBstructureIDs
+                effLmin = options%refLBLminstructure
+                effLmax = options%refLBLmaxstructure
+                effdec = options%refLBdecaylengthstructure
+                dovesseleff = options%refLBdovessel
+
+                ! SOLPS target refinement, gated behind
+                ! gg.ref.solps_target_refinements (default off, so
+                ! grids not prepared for SOLPS keep their old
+                ! behavior): for SOLPS-classified geometries the
+                ! limiter surface / divertor target segments
+                ! (goat.vessel.solps_*_target) are added to
+                ! gg.ref.LB.structureIDs when missing. Empty lists
+                ! simply contribute nothing - no requirement is
+                ! enforced here.
+                if (options%solpstargetrefinements) then
+                call ClassifySOLPSCatalogTopology(topomesh, &
+                    catalabel, cataorient)
+                if (trim(catalabel) == 'LIM') then
+                    call AddSolpsSegsToRefinement( &
+                        vessel%solpslimind, vessel%nsolpslim, &
+                        'solps_limiter_target')
+                elseif (trim(catalabel) /= 'UNKNOWN') then
+                    call CountSOLPSXPointSides(topomesh, nbelow, &
+                        nabove)
+                    if (nbelow > 0) then
+                        call AddSolpsSegsToRefinement( &
+                            vessel%solpsldiind, vessel%nsolpsldi, &
+                            'solps_lower_divertor_inner_target')
+                        call AddSolpsSegsToRefinement( &
+                            vessel%solpsldoind, vessel%nsolpsldo, &
+                            'solps_lower_divertor_outer_target')
+                    end if
+                    if (nabove > 0) then
+                        call AddSolpsSegsToRefinement( &
+                            vessel%solpsudiind, vessel%nsolpsudi, &
+                            'solps_upper_divertor_inner_target')
+                        call AddSolpsSegsToRefinement( &
+                            vessel%solpsudoind, vessel%nsolpsudo, &
+                            'solps_upper_divertor_outer_target')
+                    end if
+                end if
+                end if
+
                 ! Include vessel vertices (e.g. targets)?
-                if (options%refLBdovessel) then 
+                if (dovesseleff) then
                     ! Get labels & coordinates
                     call vessel%polygonset%GetLabels(labels)
                     call vessel%polygonset%GetVertices(xv, yv)
@@ -13944,16 +13997,16 @@ module ggmod_gridgeneration2D
                     tempdecaylength = 0
 
                     ! Add per vessel structure
-                    do i = 1, size(options%refLBstructureIDs)
+                    do i = 1, size(effIDs)
                         ! Unpack ID
-                        associate(tID       => options%refLBstructureIDs(i))
+                        associate(tID       => effIDs(i))
 
                         ! Check vertices
                         where ( (labels(:, 1) == tID) .or. (labels(:, 2) == tID) ) 
                             includevesselvertex = .true. 
-                            tempLmin = options%refLBLminstructure(i)
-                            tempLmax = options%refLBLmaxstructure(i)
-                            tempdecaylength = options%refLBdecaylengthstructure(i)
+                            tempLmin = effLmin(i)
+                            tempLmax = effLmax(i)
+                            tempdecaylength = effdec(i)
                         end where 
             
                         ! Housekeeping
@@ -14048,6 +14101,46 @@ module ggmod_gridgeneration2D
 
         end select
 
+    contains
+
+        ! Add the segments of one SOLPS target list to the effective
+        ! structure refinement lists (gg.ref.LB.structureIDs), unless
+        ! already present; refinement values are copied from the
+        ! first structure entry, or from the X-point refinement
+        ! values when the list is empty.
+        subroutine AddSolpsSegsToRefinement(segind, nseg, tagname)
+            integer(I4), intent(in)     :: segind(:)
+            integer(I4), intent(in)     :: nseg
+            character(*), intent(in)    :: tagname
+
+            integer(I8)                 :: jj, sid
+            real(R8)                    :: aLmin, aLmax, adec
+
+            do jj = 1, int(nseg, kind=I8)
+                sid = int(segind(jj), kind=I8)
+                if (size(effIDs) > 0) then
+                    if (any(effIDs == sid)) cycle
+                end if
+                if (size(effIDs) > 0) then
+                    aLmin = effLmin(1)
+                    aLmax = effLmax(1)
+                    adec = effdec(1)
+                else
+                    aLmin = options%refLBLminxp
+                    aLmax = options%refLBLmaxxp
+                    adec = options%refLBdecaylengthxp
+                end if
+                effIDs = [effIDs, sid]
+                effLmin = [effLmin, aLmin]
+                effLmax = [effLmax, aLmax]
+                effdec = [effdec, adec]
+                dovesseleff = .true.
+                print *, 'InitializeGGTMLineRefiner: added ' // &
+                    tagname // ' segment ', sid, &
+                    ' to gg.ref.LB.structureIDs'
+            end do
+
+        end subroutine
 
     end subroutine 
 
@@ -17513,6 +17606,7 @@ module ggmod_gridgeneration2D
         ! Module variables
         use mod_definitions, only: targetID, coreID, outerboundaryID, &
             vesselID
+        use ggmod_solpsregions, only: SetSOLPSRegionsLIM
 
         ! Arguments
         type(VesselUDT), intent(in)                 :: vessel
@@ -18205,6 +18299,14 @@ module ggmod_gridgeneration2D
         ! SOLPS topology identification and face region remapping
         call IdentifySOLPSTopology(simgrid, topomesh, options)
 
+        ! Catalog-specific SOLPS region conventions: for recognized
+        ! catalog topologies, overwrite the generic remapping above
+        ! with the region numbering SOLPS expects.
+        ! Currently implemented: LIM.
+        if (trim(simgrid%data%SOLPStopologylabel) == 'LIM') then
+            call SetSOLPSRegionsLIM(simgrid, topomesh, vessel)
+        end if
+
     end subroutine
 
     subroutine TranslateGridLabelsGD(simgrid, topomesh)
@@ -18305,6 +18407,8 @@ module ggmod_gridgeneration2D
         logical, allocatable, dimension(:)      :: ispolygonstart, &
             isbranchingpolygon
         logical, allocatable, dimension(:, :)   :: hasfcreg
+        character(len=64)                       :: catalabel, &
+            cataorient
 
         ! Loop
         integer(I8)                             :: i, j, k 
@@ -18319,6 +18423,18 @@ module ggmod_gridgeneration2D
         print *, 'Please examine the resulting fcReg, cvReg and ftReg '
         print *, 'carefully afterwards'
         print *, '!====================================================!'
+
+        ! Catalog topology labelling
+        !===========================
+        ! Classify the topological mesh against the catalog of
+        ! SOLPS-relevant one-O-point topologies (up to four X-points)
+        ! and store the name as an internal, diagnostic-only label.
+        call ClassifySOLPSCatalogTopology(topomesh, catalabel, &
+            cataorient)
+        simgrid%data%SOLPStopologylabel = catalabel
+        simgrid%data%SOLPStopologyorient = cataorient
+        print *, 'SOLPS catalog topology: ' // trim(catalabel) // &
+            ' (' // trim(cataorient) // ')'
 
         ! Determine topology type
         !========================
