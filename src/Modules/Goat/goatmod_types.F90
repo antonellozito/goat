@@ -417,6 +417,14 @@ module goatmod_types
         ! Topological mesh type
         integer(I8)                             :: topoflag
 
+        ! SOLPS catalog topology label (diagnostic refinement of
+        ! topoflag; assigned by ClassifySOLPSCatalogTopology when the
+        ! configuration matches the one-O-point / max-four-X-point
+        ! catalog, otherwise 'UNKNOWN'). Internal only: not written
+        ! to any output file.
+        character(len=64)                       :: SOLPStopologylabel = 'UNKNOWN'
+        character(len=64)                       :: SOLPStopologyorient = 'n/a'
+
         ! OMP & IMP
         integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
             IMPcell, IMPface
@@ -677,6 +685,25 @@ module goatmod_types
         integer(I4)                         :: ntp = 0
         integer(I4), allocatable            :: allTPind(:)
         integer(I4), allocatable            :: TPind(:)
+
+        ! SOLPS limiter target segments (structure indices from
+        ! goat.vessel.solps_limiter_target; consumed by the SOLPS
+        ! region assignment for limiter grids)
+        integer(I4)                         :: nsolpslim = 0
+        integer(I4), allocatable            :: solpslimind(:)
+
+        ! SOLPS divertor target segments (structure indices from
+        ! goat.vessel.solps_{lower,upper}_divertor_{inner,outer}_target;
+        ! consumed by the SOLPS region assignment of divertor
+        ! topologies)
+        integer(I4)                         :: nsolpsldi = 0
+        integer(I4)                         :: nsolpsldo = 0
+        integer(I4)                         :: nsolpsudi = 0
+        integer(I4)                         :: nsolpsudo = 0
+        integer(I4), allocatable            :: solpsldiind(:)
+        integer(I4), allocatable            :: solpsldoind(:)
+        integer(I4), allocatable            :: solpsudiind(:)
+        integer(I4), allocatable            :: solpsudoind(:)
 
         ! Structures
         integer(I4)                         :: nstructures = 0
@@ -5895,6 +5922,30 @@ module goatmod_types
             end if
         end if
 
+        ! SOLPS limiter and divertor target segments: validate and
+        ! store on the vessel object (an options component may be
+        ! unallocated when the options object did not pass through the
+        ! vessel-options reader - treat that as an empty list)
+        call StoreSolpsTargetSegments(vesseloptions%solpslimitertarget, &
+            'goat.vessel.solps_limiter_target', &
+            vessel%nsolpslim, vessel%solpslimind)
+        call StoreSolpsTargetSegments( &
+            vesseloptions%solpslowdivinnertarget, &
+            'goat.vessel.solps_lower_divertor_inner_target', &
+            vessel%nsolpsldi, vessel%solpsldiind)
+        call StoreSolpsTargetSegments( &
+            vesseloptions%solpslowdivoutertarget, &
+            'goat.vessel.solps_lower_divertor_outer_target', &
+            vessel%nsolpsldo, vessel%solpsldoind)
+        call StoreSolpsTargetSegments( &
+            vesseloptions%solpsupdivinnertarget, &
+            'goat.vessel.solps_upper_divertor_inner_target', &
+            vessel%nsolpsudi, vessel%solpsudiind)
+        call StoreSolpsTargetSegments( &
+            vesseloptions%solpsupdivoutertarget, &
+            'goat.vessel.solps_upper_divertor_outer_target', &
+            vessel%nsolpsudo, vessel%solpsudoind)
+
 
         ! Allocate
         allocate(vessel%targetpolygons(nTP))
@@ -6034,6 +6085,34 @@ module goatmod_types
         call vessel%exactplfvessel%VisualizeLabel('levelset_label_4', labelindin=4)
 
         end associate
+
+    contains
+
+        ! Validate one SOLPS target segment list against the vessel
+        ! structures and store it on the vessel object. An unallocated
+        ! options component (options object did not pass through the
+        ! vessel-options reader) is treated as an empty list.
+        subroutine StoreSolpsTargetSegments(segs, optname, nseg, segind)
+            integer(I8), allocatable, intent(in)    :: segs(:)
+            character(*), intent(in)                :: optname
+            integer(I4), intent(out)                :: nseg
+            integer(I4), allocatable, intent(inout) :: segind(:)
+
+            nseg = 0
+            if (allocated(segs)) nseg = int(size(segs), kind=I4)
+            if (allocated(segind)) deallocate(segind)
+            allocate(segind(nseg))
+            if (nseg > 0) then
+                if (any(segs > int(vessel%nstructures, kind=I8)) .or. &
+                    any(segs < 1)) then
+                    call gdErrorHandler('ExtractVesselData: some ' // &
+                        'segment indices are out of the vessel ' // &
+                        'structure range, check ' // optname)
+                end if
+                segind = int(segs, kind=I4)
+            end if
+
+        end subroutine
 
     end subroutine
 

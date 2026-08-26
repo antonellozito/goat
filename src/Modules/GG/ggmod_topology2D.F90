@@ -40,7 +40,8 @@ module ggmod_topology2D
     private 
     public :: TopomeshUDT, ConstructTopologicalMesh, TraceExtrema2D, &
         TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh, &
-        IdentifyTopologicalMeshType
+        IdentifyTopologicalMeshType, ClassifySOLPSCatalogTopology, &
+        CountSOLPSXPointSides
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-14 ! relative field tolerance under which extrema are removed
@@ -16210,6 +16211,764 @@ module ggmod_topology2D
         end if 
 
     end function
+
+    ! SOLPS catalog topology classification
+    subroutine ClassifySOLPSCatalogTopology(topomesh, label, orient)
+
+        ! Description
+        !============
+        ! Classify the topological mesh against the catalog of
+        ! SOLPS-relevant one-O-point topologies with up to four
+        ! X-points (at most two above and at most two below the
+        ! magnetic axis). Any configuration outside the catalog
+        ! is labelled 'UNKNOWN'.
+        ! The full capabilities of this subroutine to correctly
+        ! classify all possibly topologies with one O-point and
+        ! up to 4 X-points have not been tested yet!
+        !
+        ! Method:
+        ! - primary X-point(s) = saddle vertices of core cells
+        ! - connectivity between X-points = joined by a chain of
+        !   separatrix faces (same flux tube); never mere flux
+        !   equality
+        ! - radial classification = signed flux distance from the
+        !   primary separatrix, positive towards the SOL (negative
+        !   values sit in a private flux region)
+        ! - main-SOL vs virtual-PFR disambiguation = flux-surface
+        !   adjacency of the topomesh cells around the X-point: a
+        !   null inside another null's virtual PFR is enclosed solely
+        !   by that null's flux surface, whereas a main-SOL null is
+        !   also bounded by an inner surface (robust against wall
+        !   clipping of the separatrix arms)
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh
+        character(len=64), intent(out)  :: label, orient
+
+        ! Auxiliary
+        integer(I8), allocatable, dimension(:)  :: xp, op, cc, ccf, &
+            pxpraw, pxp, tmpi, reach, secl, wfaces
+        integer(I8)                             :: nxp, nop, np, i, j, &
+            k, iP, ip1, ip2, iX2, iX3, iXa, iXb, iXq, iXpart, iSu, &
+            iSl, iPref, nsame, nopp, nsec
+        integer(I8), allocatable                :: side(:), xfs(:)
+        real(R8), allocatable                   :: dpsi(:)
+        real(R8)                                :: xc, yc, fp, fcore, &
+            sgn, dq
+        logical, allocatable                    :: connmat(:, :), &
+            selfloop(:)
+        logical                                 :: ok, pairconn, &
+            conn2q, wedgea
+        character(len=11)                       :: t2, tu, tl, ts
+        character(len=4)                        :: sfx
+        character(len=12)                       :: tpb
+
+        ! Initialize
+        !===========
+        label = 'UNKNOWN'
+        orient = 'n/a'
+
+        associate(vert => topomesh%vert, cell => topomesh%cell)
+
+        ! Global structure checks
+        !========================
+        ! X-points and core
+        xp = topomesh%GetXPointIDs()
+        nxp = size(xp)
+        cc = topomesh%GetCoreCellIDs()
+        if (size(cc) == 0) then
+            call setunknown('no confined region (core) in the domain')
+            return
+        end if
+        if (nxp == 0) then
+            label = 'LIM'
+            orient = 'n/a'
+            return
+        end if
+        if (nxp > 4) then
+            call setunknown('more than four X-points in the domain')
+            return
+        end if
+
+        ! O-points
+        op = topomesh%GetOPointIDs()
+        nop = size(op)
+        if (nop > 1) then
+            call setunknown('more than one O-point in the domain')
+            return
+        end if
+
+        ! Reference center and core-side flux value: from the O-point
+        ! vertex when the core is meshed through the axis, otherwise
+        ! from the core-cell centroid and the core boundary faces
+        if (nop == 1) then
+            xc = vert%x(op(1))
+            yc = vert%y(op(1))
+            fcore = vert%fval(op(1))
+        else
+            allocate(tmpi(0))
+            do i = 1, size(cc)
+                tmpi = [tmpi, cell%GetVert(cc(i))]
+            end do
+            xc = sum(vert%x(tmpi))/real(size(tmpi), kind=R8)
+            yc = sum(vert%y(tmpi))/real(size(tmpi), kind=R8)
+            deallocate(tmpi)
+            ccf = topomesh%GetCoreFaceIDs()
+            if (size(ccf) == 0) then
+                call setunknown('cannot determine the core-side flux value')
+                return
+            end if
+            fcore = 0.0_R8
+            do i = 1, size(ccf)
+                fcore = fcore + &
+                    0.5_R8*(vert%fval(topomesh%face%vert(ccf(i), 1)) + &
+                            vert%fval(topomesh%face%vert(ccf(i), 2)))
+            end do
+            fcore = fcore/real(size(ccf), kind=R8)
+        end if
+
+        ! Flux orientation: signed distance from the primary
+        ! separatrix, positive towards the SOL
+        pxpraw = topomesh%GetPrimaryXPointIDs()
+        call Unique(pxpraw, pxp)
+        np = size(pxp)
+        if (np < 1) then
+            call setunknown('X-points present but none bounds the core')
+            return
+        end if
+        if (np > 2) then
+            call setunknown('more than two X-points bound the core')
+            return
+        end if
+        fp = vert%fval(pxp(1))
+        if (fp == fcore) then
+            call setunknown('cannot orient the flux coordinate')
+            return
+        end if
+        sgn = sign(1.0_R8, fp - fcore)
+        allocate(dpsi(nxp))
+        do i = 1, nxp
+            dpsi(i) = sgn*(vert%fval(xp(i)) - fp)
+        end do
+
+        ! Sides (above/below the O-point) and per-side limits
+        allocate(side(nxp))
+        do i = 1, nxp
+            side(i) = merge(1_I8, -1_I8, vert%y(xp(i)) >= yc)
+        end do
+        if ((count(side == 1) > 2) .or. (count(side == -1) > 2)) then
+            call setunknown('more than two X-points on one side of the O-point')
+            return
+        end if
+
+        ! Separatrix component walks: connectivity and the flux
+        ! surface ID of each X-point's level set
+        !===========================================================
+        allocate(connmat(nxp, nxp), selfloop(nxp), xfs(nxp))
+        connmat = .false.
+        xfs = 0
+        do i = 1, nxp
+            call WalkSeparatrixComponent(topomesh, xp(i), reach, &
+                wfaces, ok)
+            if (.not. ok) then
+                call setunknown('separatrix component walk failed')
+                return
+            end if
+            if (size(wfaces) > 0) then
+                xfs(i) = topomesh%face%fsID(wfaces(1))
+            end if
+            selfloop(i) = any(reach == xp(i))
+            do j = 1, nxp
+                if (j /= i) connmat(i, j) = any(reach == xp(j))
+            end do
+        end do
+        connmat = connmat .or. transpose(connmat)
+
+        ! A closed separatrix loop is expected only for core-bounding
+        ! X-points (the core loop itself)
+        do i = 1, nxp
+            if (selfloop(i) .and. .not. any(xp(i) == pxp)) then
+                call setunknown('closed separatrix loop at a non-primary X-point')
+                return
+            end if
+        end do
+
+        ! Primary bookkeeping and boundary-case guards
+        !=============================================
+        ip1 = findloc(xp, pxp(1), 1)
+        ip2 = 0
+        if (np == 2) then
+            ip2 = findloc(xp, pxp(2), 1)
+            if (side(ip1)*side(ip2) > 0) then
+                call setunknown('two core-bounding X-points on the same side (catalog boundary case)')
+                return
+            end if
+            if (.not. connmat(ip1, ip2)) then
+                call setunknown('two disconnected core-bounding X-points (unexpected)')
+                return
+            end if
+        end if
+
+        ! Any secondary on the primary separatrix component is a
+        ! catalog boundary case (exactly-connected snowflake)
+        do i = 1, nxp
+            if (any(xp(i) == pxp)) cycle
+            if (connmat(i, ip1)) then
+                call setunknown('secondary X-point on the primary separatrix (catalog boundary case)')
+                return
+            end if
+            if (np == 2) then
+                if (connmat(i, ip2)) then
+                    call setunknown('secondary X-point on the primary separatrix (catalog boundary case)')
+                    return
+                end if
+            end if
+        end do
+
+        ! Classification tree
+        !====================
+        if (np == 1) then
+
+            iP = ip1
+
+            ! Partition the secondaries by side
+            allocate(secl(0))
+            do i = 1, nxp
+                if (i /= iP) secl = [secl, i]
+            end do
+            nsame = count(side(secl) == side(iP))
+            nopp = size(secl) - nsame
+
+            if (nsame == 0 .and. nopp == 0) then
+
+                ! Single null
+                label = 'SN' // stag(side(iP))
+                orient = 'primary ' // sname(side(iP))
+
+            elseif (nsame == 1 .and. nopp == 0) then
+
+                ! Simple snowflake
+                iX2 = secl(1)
+                t2 = sstype(iX2, iP)
+                label = trim(t2) // stag(side(iP))
+                orient = 'X-points ' // sname(side(iP))
+
+            elseif (nsame == 0 .and. nopp == 1) then
+
+                ! Disconnected double null
+                iXq = secl(1)
+                if (dpsi(iXq) <= 0.0_R8) then
+                    call setunknown('opposite X-point on the core side of the separatrix (inconsistent)')
+                    return
+                end if
+                label = 'DDN' // stag(side(iP))
+                orient = 'primary ' // sname(side(iP))
+
+            elseif (nsame == 1 .and. nopp == 1) then
+
+                ! Snowflake at the primary divertor + one opposite
+                ! X-point (3X family A)
+                if (side(secl(1)) == side(iP)) then
+                    iX2 = secl(1)
+                    iX3 = secl(2)
+                else
+                    iX2 = secl(2)
+                    iX3 = secl(1)
+                end if
+                t2 = sstype(iX2, iP)
+                if (dpsi(iX3) <= 0.0_R8) then
+                    call setunknown('opposite X-point on the core side of the separatrix (inconsistent)')
+                    return
+                end if
+                if (t2 == 'SFplus') then
+                    if (connmat(iX2, iX3)) then
+                        call setunknown('PFR X-point connected to a SOL X-point (inconsistent)')
+                        return
+                    end if
+                    label = trim(t2) // stag(side(iP)) // &
+                        '/X' // stag(side(iX3))
+                else
+                    if (connmat(iX2, iX3)) then
+                        label = trim(t2) // stag(side(iP)) // &
+                            '/Xconn' // stag(side(iX3))
+                    else
+                        if (dpsi(iX3) < dpsi(iX2)) then
+                            label = trim(t2) // &
+                                stag(side(iP)) // '/X1' // &
+                                stag(side(iX3))
+                        else
+                            label = trim(t2) // &
+                                stag(side(iP)) // '/X2' // &
+                                stag(side(iX3))
+                        end if
+                    end if
+                end if
+                orient = 'snowflake pair ' // sname(side(iP))
+
+            elseif (nsame == 0 .and. nopp == 2) then
+
+                ! Snowflake-structured secondary divertor (3X family B)
+                iXa = secl(1)
+                iXb = secl(2)
+                if ((dpsi(iXa) <= 0.0_R8) .or. (dpsi(iXb) <= 0.0_R8)) then
+                    call setunknown('opposite X-point on the core side of the separatrix (inconsistent)')
+                    return
+                end if
+                if (connmat(iXa, iXb)) then
+                    label = 'DDN' // stag(side(iP)) // '.conn' // &
+                        stag(side(iXa))
+                else
+                    ! iXa = radially inner flux level; only that one
+                    ! can sit in the other's virtual PFR
+                    if (dpsi(iXa) > dpsi(iXb)) then
+                        i = iXa
+                        iXa = iXb
+                        iXb = i
+                    end if
+                    if (inwedge(iXa, iXb)) then
+                        label = 'DDN' // stag(side(iP)) // &
+                            '.SFplus' // stag(side(iXa))
+                    else
+                        label = 'DDN' // stag(side(iP)) // '.' // &
+                            trim(lhletter(iXb, iXa)) // &
+                            stag(side(iXa))
+                    end if
+                end if
+                orient = 'primary ' // sname(side(iP))
+
+            else
+
+                ! nsame == 1, nopp == 2: full 4X disconnected family
+                if (side(secl(1)) == side(iP)) then
+                    iX2 = secl(1)
+                    iXa = secl(2)
+                    iXb = secl(3)
+                elseif (side(secl(2)) == side(iP)) then
+                    iX2 = secl(2)
+                    iXa = secl(1)
+                    iXb = secl(3)
+                else
+                    iX2 = secl(3)
+                    iXa = secl(1)
+                    iXb = secl(2)
+                end if
+                t2 = sstype(iX2, iP)
+                if ((dpsi(iXa) <= 0.0_R8) .or. (dpsi(iXb) <= 0.0_R8)) then
+                    call setunknown('opposite X-point on the core side of the separatrix (inconsistent)')
+                    return
+                end if
+
+                ! Opposite-divertor structure
+                pairconn = connmat(iXa, iXb)
+                if (pairconn) then
+                    ts = 'conn'
+                    iXq = iXa
+                    iXpart = iXb
+                    dq = dpsi(iXq)
+                else
+                    ! Radially inner flux level first; only that one
+                    ! can sit in the other's virtual PFR
+                    if (dpsi(iXa) > dpsi(iXb)) then
+                        i = iXa
+                        iXa = iXb
+                        iXb = i
+                    end if
+                    wedgea = inwedge(iXa, iXb)
+                    if (wedgea) then
+                        iXq = iXb
+                        iXpart = iXa
+                        ts = 'SFplus'
+                    else
+                        iXq = iXa
+                        iXpart = iXb
+                        ts = lhletter(iXpart, iXq)
+                    end if
+                    dq = dpsi(iXq)
+                end if
+
+                ! Primary-divertor type with band qualifier
+                if (t2 == 'SFplus') then
+                    if (connmat(iX2, iXq) .or. connmat(iX2, iXpart)) then
+                        call setunknown('PFR X-point connected to a SOL X-point (inconsistent)')
+                        return
+                    end if
+                    tpb = 'SFplus'
+                else
+                    conn2q = connmat(iX2, iXq) .or. connmat(iX2, iXpart)
+                    if (conn2q .and. pairconn) then
+                        call setunknown('triple-connected X-points (catalog boundary case)')
+                        return
+                    end if
+                    if (connmat(iX2, iXpart) .and. (t2 /= ts)) then
+                        call setunknown('connected X-points in independent channels (inconsistent)')
+                        return
+                    end if
+                    if (connmat(iX2, iXq)) then
+                        tpb = trim(t2) // '='
+                    elseif (dpsi(iX2) < dq) then
+                        tpb = trim(t2) // '1'
+                    else
+                        tpb = trim(t2) // '2'
+                    end if
+                end if
+
+                ! Same-channel suffix (both minus, same side letter,
+                ! both beyond the secondary separatrix)
+                if ((t2 == ts) .and. &
+                    (tpb(len_trim(tpb):len_trim(tpb)) == '2')) then
+                    if (connmat(iX2, iXpart)) then
+                        sfx = 'conn'
+                    elseif (dpsi(iX2) < dpsi(iXpart)) then
+                        sfx = 'in'
+                    else
+                        sfx = 'out'
+                    end if
+                    label = 'DDN2[' // trim(tpb) // &
+                        stag(side(iP)) // '|' // trim(ts) // &
+                        stag(side(iXa)) // ']' // trim(sfx)
+                else
+                    label = 'DDN2[' // trim(tpb) // &
+                        stag(side(iP)) // '|' // trim(ts) // &
+                        stag(side(iXa)) // ']'
+                end if
+                orient = 'primary ' // sname(side(iP))
+
+            end if
+
+        else
+
+            ! np == 2: connected primaries (CDN base)
+            nsec = nxp - 2
+            if (nsec == 0) then
+
+                label = 'CDN'
+                orient = 'symmetric'
+
+            elseif (nsec == 1) then
+
+                do i = 1, nxp
+                    if (any(xp(i) == pxp)) cycle
+                    iX2 = i
+                end do
+                iPref = merge(ip1, ip2, side(ip1) == side(iX2))
+                t2 = sstype(iX2, iPref)
+                label = 'CDN.' // trim(t2) // stag(side(iX2))
+                orient = 'secondary ' // sname(side(iX2))
+
+            else
+
+                ! Two secondaries, one per side (per-side limit)
+                iSu = 0
+                iSl = 0
+                do i = 1, nxp
+                    if (any(xp(i) == pxp)) cycle
+                    if (side(i) == 1) then
+                        iSu = i
+                    else
+                        iSl = i
+                    end if
+                end do
+                if ((iSu == 0) .or. (iSl == 0)) then
+                    call setunknown('two secondaries on the same side of a connected double null (inconsistent)')
+                    return
+                end if
+                tu = sstype(iSu, merge(ip1, ip2, side(ip1) == 1_I8))
+                tl = sstype(iSl, merge(ip1, ip2, side(ip1) == -1_I8))
+
+                if ((tu == tl) .and. (tu /= 'SFplus')) then
+                    if (connmat(iSu, iSl)) then
+                        ! Mirror-symmetric: no orientation tags
+                        label = 'CDN2{' // trim(tu) // ',' // &
+                            trim(tl) // '}conn'
+                        orient = 'symmetric'
+                    else
+                        ! Innermost secondary listed first
+                        if (dpsi(iSu) <= dpsi(iSl)) then
+                            label = 'CDN2{' // trim(tu) // &
+                                '_upper,' // trim(tl) // &
+                                '_lower}disc'
+                        else
+                            label = 'CDN2{' // trim(tl) // &
+                                '_lower,' // trim(tu) // &
+                                '_upper}disc'
+                        end if
+                        orient = 'inner secondary ' // &
+                            sname(merge(side(iSu), side(iSl), &
+                            dpsi(iSu) <= dpsi(iSl)))
+                    end if
+                else
+                    if (connmat(iSu, iSl)) then
+                        call setunknown('connected secondaries in independent channels (inconsistent)')
+                        return
+                    end if
+                    if (tu == tl) then
+                        ! Both plus: mirror-symmetric, no tags
+                        label = 'CDN2{' // trim(tu) // ',' // &
+                            trim(tl) // '}'
+                    elseif (lhrank(tu) <= lhrank(tl)) then
+                        label = 'CDN2{' // trim(tu) // '_upper,' // &
+                            trim(tl) // '_lower}'
+                    else
+                        label = 'CDN2{' // trim(tl) // '_lower,' // &
+                            trim(tu) // '_upper}'
+                    end if
+                    orient = 'upper: ' // trim(tu) // ', lower: ' // trim(tl)
+                end if
+
+            end if
+
+        end if
+
+        end associate
+
+    contains
+
+        ! Set the UNKNOWN label with a printed reason
+        subroutine setunknown(reason)
+            character(*), intent(in)    :: reason
+            label = 'UNKNOWN'
+            orient = 'n/a'
+            print *, 'ClassifySOLPSCatalogTopology: UNKNOWN topology: ' &
+                // reason
+        end subroutine
+
+        ! Side name
+        function sname(s) result(str)
+            integer(I8), intent(in)     :: s
+            character(len=5)            :: str
+            if (s == 1_I8) then
+                str = 'upper'
+            else
+                str = 'lower'
+            end if
+        end function
+
+        ! Orientation tag for the label string
+        function stag(s) result(str)
+            integer(I8), intent(in)     :: s
+            character(len=6)            :: str
+            if (s == 1_I8) then
+                str = '_upper'
+            else
+                str = '_lower'
+            end if
+        end function
+
+        ! LFS/HFS letter of a secondary relative to a reference null
+        function lhletter(isec, iref) result(t)
+            integer(I8), intent(in)     :: isec, iref
+            character(len=11)           :: t
+            if (topomesh%vert%x(xp(isec)) > topomesh%vert%x(xp(iref))) then
+                t = 'LFS_SFminus'
+            else
+                t = 'HFS_SFminus'
+            end if
+        end function
+
+        ! Canonical ordering rank of the type letters
+        function lhrank(t) result(r)
+            character(len=*), intent(in)    :: t
+            integer(I8)                     :: r
+            select case (t)
+            case ('LFS_SFminus')
+                r = 1
+            case ('HFS_SFminus')
+                r = 2
+            case default
+                r = 3
+            end select
+        end function
+
+        ! Type of a same-side-of-a-primary secondary: 'SFplus'
+        ! (core-side flux) or 'LFS_SFminus'/'HFS_SFminus' (in the SOL)
+        function sstype(isec, irefprim) result(t)
+            integer(I8), intent(in)     :: isec, irefprim
+            character(len=11)           :: t
+            if (dpsi(isec) < 0.0_R8) then
+                t = 'SFplus'
+            else
+                t = lhletter(isec, irefprim)
+            end if
+        end function
+
+        ! Check whether X-point isec sits in the virtual PFR of
+        ! X-point iw: all separatrix faces bounding the topomesh
+        ! cells around isec, other than isec's own level set, must
+        ! belong to iw's level set (and at least one such face must
+        ! exist). A main-SOL null is instead also bounded radially
+        ! inward by a different surface (the primary separatrix or a
+        ! third null's level set).
+        function inwedge(isec, iw) result(w)
+            integer(I8), intent(in)     :: isec, iw
+            logical                     :: w
+            integer(I8), allocatable    :: tcl(:), tcf(:)
+            integer(I8)                 :: ic, jf, nother
+            nother = 0
+            w = .true.
+            associate(vrt => topomesh%vert, fc => topomesh%face, &
+                cl => topomesh%cell)
+            tcl = vrt%cell(vrt%cellP(xp(isec), 1) : &
+                vrt%cellP(xp(isec), 1) + vrt%cellP(xp(isec), 2) - 1)
+            do ic = 1, size(tcl)
+                tcf = cl%GetFace(tcl(ic))
+                do jf = 1, size(tcf)
+                    if (fc%type(tcf(jf)) /= TMfacesepID) cycle
+                    if (fc%fsID(tcf(jf)) == xfs(isec)) cycle
+                    nother = nother + 1
+                    if (fc%fsID(tcf(jf)) /= xfs(iw)) w = .false.
+                end do
+            end do
+            end associate
+            if (nother == 0) w = .false.
+        end function
+
+    end subroutine
+
+    ! Count the X-points below/above the O-point
+    subroutine CountSOLPSXPointSides(topomesh, nbelow, nabove)
+
+        ! Description
+        !============
+        ! Count the saddle vertices below and above the O-point (the
+        ! O-point vertex when the axis is meshed, otherwise the
+        ! core-cell vertex centroid) - the same side convention as
+        ! ClassifySOLPSCatalogTopology. Returns zeros when there are
+        ! no X-points or no reference (no O-point and no core cells).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)              :: topomesh
+        integer(I8), intent(out)        :: nbelow, nabove
+
+        ! Auxiliary
+        integer(I8), allocatable        :: xp(:), op(:), cc(:), tcv(:)
+        real(R8)                        :: yc
+        integer(I8)                     :: i, k
+
+        ! Count
+        !======
+        nbelow = 0
+        nabove = 0
+        xp = topomesh%GetXPointIDs()
+        if (size(xp) == 0) return
+        op = topomesh%GetOPointIDs()
+        if (size(op) >= 1) then
+            yc = topomesh%vert%y(op(1))
+        else
+            cc = topomesh%GetCoreCellIDs()
+            if (size(cc) == 0) return
+            yc = 0.0_R8
+            k = 0
+            do i = 1, size(cc)
+                tcv = topomesh%cell%GetVert(cc(i))
+                yc = yc + sum(topomesh%vert%y(tcv))
+                k = k + size(tcv)
+            end do
+            yc = yc/real(k, kind=R8)
+        end if
+        do i = 1, size(xp)
+            if (topomesh%vert%y(xp(i)) >= yc) then
+                nabove = nabove + 1
+            else
+                nbelow = nbelow + 1
+            end if
+        end do
+
+    end subroutine
+
+    ! Walk the separatrix component of one X-point
+    subroutine WalkSeparatrixComponent(topomesh, ixp, reach, wfaces, &
+        ok)
+
+        ! Description
+        !============
+        ! Walk all separatrix-face chains emanating from the saddle
+        ! vertex ixp: follow each branch through regular vertices
+        ! until another saddle, a terminal vertex (wall strike), or a
+        ! loop back to the start is reached. Returns the saddle
+        ! vertex IDs reached (including ixp itself for closed loops)
+        ! and the list of walked separatrix faces (the part of ixp's
+        ! level-set component traced through the domain).
+
+        ! Declare variables
+        !==================
+        ! Arguments
+        class(TopomeshUDT)                      :: topomesh
+        integer(I8), intent(in)                 :: ixp
+        integer(I8), allocatable, intent(out)   :: reach(:), wfaces(:)
+        logical, intent(out)                    :: ok
+
+        ! Auxiliary
+        logical, allocatable                    :: visited(:)
+        integer(I8), allocatable                :: tf(:), branch(:), &
+            nxtf(:)
+        integer(I8)                             :: ib, f, vcur, vnxt
+
+        ! Initialize
+        !===========
+        ok = .true.
+        allocate(reach(0), wfaces(0))
+        allocate(visited(topomesh%face%ntot))
+        visited = .false.
+
+        associate(vert => topomesh%vert, face => topomesh%face)
+
+        ! Separatrix branches emanating from the X-point
+        tf = vert%GetFace(ixp)
+        branch = pack(tf, face%type(tf) == TMfacesepID)
+
+        ! Walk each branch
+        !=================
+        do ib = 1, size(branch)
+            f = branch(ib)
+            if (visited(f)) cycle
+            vcur = ixp
+            do while (.true.)
+                visited(f) = .true.
+                wfaces = [wfaces, f]
+
+                ! Step to the other end of the face
+                if (face%vert(f, 1) == vcur) then
+                    vnxt = face%vert(f, 2)
+                elseif (face%vert(f, 2) == vcur) then
+                    vnxt = face%vert(f, 1)
+                else
+                    ok = .false.
+                    exit
+                end if
+
+                ! Chain termination checks
+                if ((vnxt == ixp) .or. &
+                    (vert%type(vnxt) == TMvertexsaddleID)) then
+                    ! Reached a saddle (possibly back to the start)
+                    reach = [reach, vnxt]
+                    exit
+                end if
+
+                ! Continue along the unique next separatrix face
+                nxtf = vert%GetFace(vnxt)
+                nxtf = pack(nxtf, (face%type(nxtf) == TMfacesepID) &
+                    .and. (.not. visited(nxtf)))
+                if (size(nxtf) == 0) then
+                    ! Terminal vertex (wall strike or clipped end)
+                    exit
+                elseif (size(nxtf) > 1) then
+                    ! Non-saddle separatrix junction: unexpected
+                    ok = .false.
+                    exit
+                end if
+                vcur = vnxt
+                f = nxtf(1)
+            end do
+            if (.not. ok) exit
+        end do
+
+        end associate
+
+    end subroutine
 
     ! Topological metric computations
     subroutine GetTMFacePsiValueDistribution(topomesh, fieldtracer, &
