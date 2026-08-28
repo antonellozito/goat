@@ -13956,9 +13956,9 @@ module ggmod_gridgeneration2D
                 ! simply contribute nothing - no requirement is
                 ! enforced here.
                 if (options%solpstargetrefinements) then
-                call ClassifySOLPSCatalogTopology(topomesh, &
+                call ClassifyBasicSOLPSCatalogTopology(topomesh, &
                     catalabel, cataorient)
-                if (trim(catalabel) == 'LIM') then
+                if (trim(catalabel) == 'GEOMETRY_LIMITER') then
                     call AddSolpsSegsToRefinement( &
                         vessel%solpslimind, vessel%nsolpslim, &
                         'solps_limiter_target')
@@ -17607,7 +17607,7 @@ module ggmod_gridgeneration2D
         use mod_definitions, only: targetID, coreID, outerboundaryID, &
             vesselID
         use ggmod_solpsregions, only: SetSOLPSRegionsLIM, &
-            SetSOLPSRegionsSN
+            SetSOLPSRegionsSN, SetSOLPSRegionsDN
 
         ! Arguments
         type(VesselUDT), intent(in)                 :: vessel
@@ -18303,16 +18303,24 @@ module ggmod_gridgeneration2D
         ! Catalog-specific SOLPS region conventions: for recognized
         ! catalog topologies, overwrite the generic remapping above
         ! with the region numbering SOLPS expects.
-        ! Currently implemented: LIM, SN (lower/upper).
-        if (trim(simgrid%data%SOLPStopologylabel) == 'LIM') then
+        ! Currently implemented: GEOMETRY_LIMITER, GEOMETRY_SN
+        ! (lower/upper), GEOMETRY_CDN, GEOMETRY_DDN_BOTTOM/TOP.
+        if (trim(simgrid%data%SOLPStopologylabel) == &
+            'GEOMETRY_LIMITER') then
             call SetSOLPSRegionsLIM(simgrid, topomesh, vessel)
         elseif (trim(simgrid%data%SOLPStopologylabel) == &
-            'SN_lower') then
+            'GEOMETRY_SN') then
             call SetSOLPSRegionsSN(simgrid, topomesh, vessel, &
-                .false.)
+                trim(simgrid%data%SOLPStopologyorient) == 'upper')
         elseif (trim(simgrid%data%SOLPStopologylabel) == &
-            'SN_upper') then
-            call SetSOLPSRegionsSN(simgrid, topomesh, vessel, &
+            'GEOMETRY_CDN') then
+            call SetSOLPSRegionsDN(simgrid, topomesh, vessel, &
+                .false.)
+        elseif ((trim(simgrid%data%SOLPStopologylabel) == &
+            'GEOMETRY_DDN_BOTTOM') .or. &
+            (trim(simgrid%data%SOLPStopologylabel) == &
+            'GEOMETRY_DDN_TOP')) then
+            call SetSOLPSRegionsDN(simgrid, topomesh, vessel, &
                 .true.)
         end if
 
@@ -18435,10 +18443,11 @@ module ggmod_gridgeneration2D
 
         ! Catalog topology labelling
         !===========================
-        ! Classify the topological mesh against the catalog of
-        ! SOLPS-relevant one-O-point topologies (up to four X-points)
-        ! and store the name as an internal, diagnostic-only label.
-        call ClassifySOLPSCatalogTopology(topomesh, catalabel, &
+        ! Classify the topological mesh into the basic SOLPS/B2.5
+        ! topology families (GEOMETRY_LIMITER/SN/CDN/DDN_BOTTOM/
+        ! DDN_TOP, else UNKNOWN) and store the name as an internal
+        ! label.
+        call ClassifyBasicSOLPSCatalogTopology(topomesh, catalabel, &
             cataorient)
         simgrid%data%SOLPStopologylabel = catalabel
         simgrid%data%SOLPStopologyorient = cataorient
