@@ -42,7 +42,8 @@ module ggmod_topology2D
         TraceTangencyPoints2D, ReadTopologicalMesh, WriteTopologicalMesh, &
         IdentifyTopologicalMeshType, &
         ClassifyBasicSOLPSCatalogTopology, &
-        CountSOLPSXPointSides
+        CountSOLPSXPointSides, &
+        WalkSeparatrixComponent
 
     ! Module parameters
     real(R8), parameter, private        :: tprelfieldtol = 1e-14 ! relative field tolerance under which extrema are removed
