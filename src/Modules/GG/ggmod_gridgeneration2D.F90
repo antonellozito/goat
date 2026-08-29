@@ -17932,12 +17932,28 @@ module ggmod_gridgeneration2D
         if (allocated(simgrid%data%isprimaryxp)) deallocate(simgrid%data%isprimaryxp)
         allocate(simgrid%data%isprimaryxp(simgrid%data%nxp))
         do i = 1, simgrid%data%nxp
-            if (any(simgrid%data%xpointID(i) == primaryxp)) then 
+            if (any(simgrid%data%xpointID(i) == primaryxp)) then
                 simgrid%data%isprimaryxp(i) = 1
             else
-                simgrid%data%isprimaryxp(i) = 0 
-            end if 
-        end do 
+                simgrid%data%isprimaryxp(i) = 0
+            end if
+        end do
+
+        ! Per-X-point divertor label. Provide a valid zero-filled array
+        ! of length nxp as the default for topologies where
+        ! AddSecondaryXPointRegions does not run (LIMITER, UNKNOWN, ...).
+        ! When AddSecondaryXPointRegions has already filled it (SN/CDN/
+        ! DDN, run earlier in TranslateGridLabelsSOLPS), keep its values.
+        if (allocated(simgrid%data%xpDivLabel)) then
+            if (size(simgrid%data%xpDivLabel) /= simgrid%data%nxp) then
+                deallocate(simgrid%data%xpDivLabel)
+                allocate(simgrid%data%xpDivLabel(simgrid%data%nxp))
+                simgrid%data%xpDivLabel = 0
+            end if
+        else
+            allocate(simgrid%data%xpDivLabel(simgrid%data%nxp))
+            simgrid%data%xpDivLabel = 0
+        end if
 
         ! Additional s-, t-point data
         simgrid%data%spointdivID = vertdivID(simgrid%data%spointID)
@@ -18240,7 +18256,8 @@ module ggmod_gridgeneration2D
         use mod_definitions, only: targetID, coreID, outerboundaryID, &
             vesselID
         use ggmod_solpsregions, only: SetSOLPSRegionsLIM, &
-            SetSOLPSRegionsSN, SetSOLPSRegionsDN
+            SetSOLPSRegionsSN, SetSOLPSRegionsDN, &
+            AddSecondaryXPointRegions
 
         ! Arguments
         type(VesselUDT), intent(in)                 :: vessel
@@ -18957,6 +18974,21 @@ module ggmod_gridgeneration2D
                 .true.)
         end if
 
+        ! Secondary (additional) X-point inventory and per-X-point
+        ! divertor labels (and, in a later step, the additional volume
+        ! regions). Runs for the divertor families only - a limiter has
+        ! no X-points by construction, UNKNOWN has no region convention.
+        if ((trim(simgrid%data%SOLPStopologylabel) == 'GEOMETRY_SN') &
+            .or. &
+            (trim(simgrid%data%SOLPStopologylabel) == 'GEOMETRY_CDN') &
+            .or. &
+            (trim(simgrid%data%SOLPStopologylabel) == &
+            'GEOMETRY_DDN_BOTTOM') .or. &
+            (trim(simgrid%data%SOLPStopologylabel) == &
+            'GEOMETRY_DDN_TOP')) then
+            call AddSecondaryXPointRegions(simgrid, topomesh, vessel)
+        end if
+
     end subroutine
 
     subroutine TranslateGridLabelsGD(simgrid, topomesh)
@@ -19086,6 +19118,27 @@ module ggmod_gridgeneration2D
         simgrid%data%SOLPStopologyorient = cataorient
         print *, 'SOLPS catalog topology: ' // trim(catalabel) // &
             ' (' // trim(cataorient) // ')'
+
+        ! Derive the SOLPS geometry ID (B2.5 b2mod_geometry constant)
+        ! from the basic-family label. Written to the traduit topology
+        ! block; independent of the region writers, so it is set even
+        ! when no region writer fires (e.g. UNKNOWN -> GENERAL).
+        select case (trim(catalabel))
+        case ('GEOMETRY_LIMITER')
+            simgrid%data%SOLPSgeometryID = 3
+        case ('GEOMETRY_SN')
+            simgrid%data%SOLPSgeometryID = 4
+        case ('GEOMETRY_CDN')
+            simgrid%data%SOLPSgeometryID = 5
+        case ('GEOMETRY_DDN_BOTTOM')
+            simgrid%data%SOLPSgeometryID = 6
+        case ('GEOMETRY_DDN_TOP')
+            simgrid%data%SOLPSgeometryID = 7
+        case default
+            ! UNKNOWN and anything unrecognized -> GENERAL
+            simgrid%data%SOLPSgeometryID = 13
+        end select
+        print *, 'SOLPS geometry ID: ', simgrid%data%SOLPSgeometryID
 
         ! Determine topology type
         !========================

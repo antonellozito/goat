@@ -30,7 +30,7 @@ module ggmod_solpsregions
     implicit none
     private
     public :: SetSOLPSRegionsLIM, SetSOLPSRegionsSN, &
-        SetSOLPSRegionsDN
+        SetSOLPSRegionsDN, AddSecondaryXPointRegions
 
 contains
 
@@ -471,10 +471,11 @@ contains
         integer(I8)                     :: i, j, k, ich, iv, ivX, w, &
             f, fprev, lbl, c, c2, ncomp, nsolcomp, nqh, nqt, nmix, &
             nsepal, npfrhalf, fstart(4), chlen(4), termvx(4), &
-            ncand(4), nfreg(0:13), ncvreg(4), nftreg(3)
+            ncand(4), nfreg(0:13), ncvreg(4), nftreg(3), nprob1, iprim
         real(R8)                        :: xc, yc, ux, uy, xxp, yxp, &
             d, dmin, score, dirx, diry, dp, s, psiX, psicore, &
-            xm, ym, vx, vy, cxr, cyr
+            xm, ym, vx, vy, cxr, cyr, ycref, fcref
+        logical                         :: okref
         character(8)                    :: chname(4)
 
         chname = ['core    ', 'PFR     ', 'West SOL', 'East SOL']
@@ -485,14 +486,43 @@ contains
         ! X-point and reference directions
         !=================================
         xp = topomesh%GetXPointIDs()
-        if (size(xp) /= 1) then
-            print *, 'SetSOLPSRegionsSN: expected exactly 1 ' // &
-                'X-point in the topomesh, found ', size(xp), &
-                ' - leaving the generic regions in place'
+        if (size(xp) == 0) then
+            print *, 'SetSOLPSRegionsSN: no X-point in the ' // &
+                'topomesh - leaving the generic regions in place'
             return
         end if
-        xxp = topomesh%vert%x(xp(1))
-        yxp = topomesh%vert%y(xp(1))
+        ! Primary X-point = the innermost on the single-null side; any
+        ! further same-side X-points (snowflake companions) are handled
+        ! afterwards by AddSecondaryXPointRegions.
+        call SOLPSReferenceCenterFlux(topomesh, ycref, fcref, okref)
+        if (.not. okref) then
+            print *, 'SetSOLPSRegionsSN: no core reference - ' // &
+                'leaving the generic regions in place'
+            return
+        end if
+        iprim = 0
+        do i = 1, size(xp)
+            if ((topomesh%vert%y(xp(i)) >= ycref) .neqv. isupper) cycle
+            d = abs(topomesh%vert%fval(xp(i)) - fcref)
+            if ((iprim == 0) .or. (d < dmin)) then
+                iprim = i
+                dmin = d
+            end if
+        end do
+        if (iprim == 0) then
+            print *, 'SetSOLPSRegionsSN: no X-point on the ' // &
+                trim(merge('upper', 'lower', isupper)) // ' side - ' // &
+                'leaving the generic regions in place'
+            return
+        end if
+        if (size(xp) > 1) then
+            print *, 'SetSOLPSRegionsSN: ', size(xp), ' X-points; ' // &
+                'primary = innermost on the ' // &
+                trim(merge('upper', 'lower', isupper)) // ' side ' // &
+                '(companions handled by AddSecondaryXPointRegions)'
+        end if
+        xxp = topomesh%vert%x(xp(iprim))
+        yxp = topomesh%vert%y(xp(iprim))
 
         ! Grid vertex sitting on the X-point
         ivX = 1
@@ -510,6 +540,30 @@ contains
                 'vertex to the X-point is ', sqrt(dmin), ' m away'
         end if
         psiX = simgrid%vert%psi(ivX)
+
+        ! Fail-fast: the primary X-point's strike legs must land on the
+        ! declared divertor targets (both target lists must be given).
+        ! West/East follow the SN convention (West = inner for a lower
+        ! SN, outer for an upper SN), but the guard only needs the two
+        ! lists of the X-point's side.
+        ! Check every X-point on this single-null side (primary + any
+        ! snowflake companions); the guard keeps only the real divertor
+        ! legs (two per X-point).
+        if (isupper) then
+            call GuardPrimaryStrikes(topomesh, vessel, dtolwall, &
+                'SetSOLPSRegionsSN', xp, [3_I8, 4_I8], nprob1)
+        else
+            call GuardPrimaryStrikes(topomesh, vessel, dtolwall, &
+                'SetSOLPSRegionsSN', xp, [1_I8, 2_I8], nprob1)
+        end if
+        if (nprob1 > 0) then
+            call gdErrorHandler('SetSOLPSRegionsSN: primary strike ' // &
+                'points are not all on declared divertor targets ' // &
+                '(see the messages above) - set/split the ' // &
+                'goat.vessel.solps_{lower,upper}_divertor_' // &
+                '{inner,outer}_target lists so every primary strike ' // &
+                'lands on target wall')
+        end if
 
         ! Core centroid: defines the reference direction
         ! u = (X-point -> core), whose left side is SOLPS West
@@ -1207,7 +1261,7 @@ contains
         integer(I8), allocatable        :: xps(:), op(:), cc(:), &
             ccf(:), tmpi(:), tcv(:), tfc(:), vf(:), cf(:), zn(:), &
             zoneid(:), cvkind(:), comp(:), queue(:), chainreg(:), &
-            compreg(:), compn(:)
+            compreg(:), compn(:), compentrance(:)
         logical, allocatable            :: iscorezone(:), &
             issepTM(:), iscoreadj(:), istLI(:), istLO(:), &
             istUI(:), istUO(:)
@@ -1217,7 +1271,7 @@ contains
             fprev, lbl, c, c2, nxp, ncomp, ncorecomp, nqh, nqt, &
             ilow, iup, off, nmix, n13c, kside, ivX(2), fstart(2, 4), &
             chlen(2, 4), termvx(2, 4), ncand(2, 4), nfreg(0:27), &
-            ncvreg(8), nftreg(3)
+            ncvreg(8), nftreg(3), nprob1
         real(R8)                        :: xc, yc, fcore, psicore, &
             s, d, dmin, score, dirx, diry, dp, xm, ym, vx, vy, zm, &
             xxp(2), yxp(2), psiX(2)
@@ -1303,6 +1357,24 @@ contains
         yxp(1) = topomesh%vert%y(xps(ilow))
         xxp(2) = topomesh%vert%x(xps(iup))
         yxp(2) = topomesh%vert%y(xps(iup))
+
+        ! Fail-fast: each primary X-point's strike legs must land on its
+        ! side's declared divertor targets (all four target lists must
+        ! be given). The lower primary feeds the lower inner/outer, the
+        ! upper primary the upper inner/outer.
+        ! Check every X-point (primaries + any snowflake companions);
+        ! the guard keeps only the real divertor legs (two per X-point).
+        call GuardPrimaryStrikes(topomesh, vessel, dtolwall, &
+            'SetSOLPSRegionsDN', xps, &
+            [1_I8, 2_I8, 3_I8, 4_I8], nprob1)
+        if (nprob1 > 0) then
+            call gdErrorHandler('SetSOLPSRegionsDN: primary strike ' // &
+                'points are not all on declared divertor targets ' // &
+                '(see the messages above) - set/split the ' // &
+                'goat.vessel.solps_{lower,upper}_divertor_' // &
+                '{inner,outer}_target lists so every primary strike ' // &
+                'lands on target wall')
+        end if
 
         ! Grid vertices sitting on the X-points
         do k = 1, 2
@@ -1537,7 +1609,7 @@ contains
 
         ! Component classification: centroids, core adjacency
         allocate(compx(ncomp), compy(ncomp), compn(ncomp), &
-            compreg(ncomp), iscoreadj(ncomp))
+            compreg(ncomp), iscoreadj(ncomp), compentrance(ncomp))
         compx = 0.0_R8
         compy = 0.0_R8
         compn = 0
@@ -1562,10 +1634,32 @@ contains
             end if
         end do
 
+        ! Which entrance chain each component touches (on its divertor,
+        ! non-core-adjacent side) -> the divertor it belongs to. This is what
+        ! actually splits inner from outer (the SAME radial cut that makes the
+        ! entrance/PFR face regions), robust to the two halves lying on the same
+        ! radial side of the X-point (a centroid-radius test then misclassifies
+        ! both as inner). Entrance chainreg: 2=lower inner, 3=upper inner,
+        ! 6=upper outer, 7=lower outer -> volume regions 3/4/7/8 respectively.
+        compentrance = 0
+        do i = 1, simgrid%face%ntot
+            k = chainreg(i)
+            if ((k /= 2) .and. (k /= 3) .and. (k /= 6) .and. (k /= 7)) cycle
+            tfc = GetFaceCell(simgrid%face, i)
+            do j = 1, size(tfc)
+                if (cvkind(tfc(j)) == KCORE) cycle
+                if (iscoreadj(comp(tfc(j)))) cycle   ! the main-SOL side
+                compentrance(comp(tfc(j))) = k       ! the divertor side
+            end do
+        end do
+
         ! Region of each component: cores 1/5 and SOLs 2/6 by the
-        ! side of the reference center, divertors 3/4/7/8 by side
-        ! (below/above the center) and radius (inboard/outboard of
-        ! their X-point)
+        ! side of the reference center; divertors 3/4/7/8 by which entrance
+        ! chain the component touches (the radial cut that also draws the
+        ! entrance/PFR face regions -- this is what splits inner from outer).
+        ! Only when a divertor component touches no entrance chain (should not
+        ! happen for a well-formed grid) fall back to the side (below/above the
+        ! center) and centroid radius vs the X-point.
         do c = 1, ncomp
             if (compn(c) == 0) then
                 compreg(c) = 0
@@ -1577,6 +1671,14 @@ contains
                 compreg(c) = merge(1_I8, 5_I8, xm < xc)
             elseif (iscoreadj(c)) then
                 compreg(c) = merge(2_I8, 6_I8, xm < xc)
+            elseif (compentrance(c) == 2) then
+                compreg(c) = 3_I8          ! lower inner divertor
+            elseif (compentrance(c) == 3) then
+                compreg(c) = 4_I8          ! upper inner divertor
+            elseif (compentrance(c) == 6) then
+                compreg(c) = 7_I8          ! upper outer divertor
+            elseif (compentrance(c) == 7) then
+                compreg(c) = 8_I8          ! lower outer divertor
             else
                 kside = merge(1_I8, 2_I8, ym < yc)
                 if (kside == 1) then
@@ -1864,6 +1966,824 @@ contains
             end do
         end subroutine
 
+    end subroutine
+
+    ! Fail-fast guard: every strike leg of the given primary X-point(s)
+    ! must land (within tol of the wall) on a structure declared as a
+    ! divertor target in one of the required target lists (integer codes
+    ! 1 = lower inner, 2 = lower outer, 3 = upper inner, 4 = upper
+    ! outer). ALL the required lists must be non-empty. The allowed set
+    ! is the UNION of the required lists, NOT per-side: a disconnected
+    ! double null's secondary separatrix strikes BOTH divertors, so an
+    ! upper X-point's legs can legitimately land on the lower targets
+    ! (this matches the plan's "one of the four target lists" rule). Two
+    ! lists may point to the same single wall structure (both legs on
+    ! one flat run), but every required list must be given. This forces
+    ! the user to declare the target segments in preprocessing so the
+    ! target regions are attributed correctly - a deliberate exception
+    ! to the region writers' otherwise no-fail philosophy (see the
+    ! SECONDARY_XPOINT_REGIONS_PLAN, preliminary task). nproblems returns
+    ! the number of problems (missing lists + off-target strikes); the
+    ! caller raises a single error if > 0, so the user sees every
+    ! offending strike (all divertors) in one run.
+    subroutine GuardPrimaryStrikes(topomesh, vessel, tol, writer, &
+        xpverts, codes, nproblems)
+
+        ! Arguments
+        type(TopomeshUDT), intent(in)   :: topomesh
+        type(VesselUDT), intent(in)     :: vessel
+        real(R8), intent(in)            :: tol
+        character(*), intent(in)        :: writer
+        integer(I8), intent(in)         :: xpverts(:), codes(:)
+        integer(I8), intent(out)        :: nproblems
+
+        ! Auxiliary
+        integer(I8), allocatable        :: sp(:), spx(:), candsp(:), &
+            usedsp(:)
+        real(R8), allocatable           :: candang(:)
+        logical, allocatable            :: allowed(:)
+        integer(I8)                     :: i, k, ic, kbest, nstrike, &
+            nviol, ncand, nused, imin, imax
+        real(R8)                        :: xs, ys, d, dmin, xX, yX, &
+            xcen, ycen, ux, uy
+        logical                         :: lists_ok, ontarget, okc
+
+        nproblems = 0
+
+        ! Allowed target structures = union of the required lists (built
+        ! with count-guarded loops, so an unallocated/empty list is safe).
+        ! Every required list must be non-empty.
+        allocate(allowed(vessel%nstructures))
+        allowed = .false.
+        lists_ok = .true.
+        do ic = 1, size(codes)
+            call MarkList(codes(ic))
+            if (ListCount(codes(ic)) <= 0) lists_ok = .false.
+        end do
+
+        ! Strike legs of the given primary X-point(s). When anything is
+        ! wrong, report each strike with its nearest structure so the
+        ! user knows which structures to declare as targets.
+        !
+        ! Only strikes on divertor legs FORMED BY their own X-point are
+        ! used for this target-attribution criterion. GOAT's strike
+        ! algorithm (GetStrikePointIDs) is unchanged and still returns
+        ! every wall-touching separatrix boundary point; but a secondary
+        ! separatrix can graze the main wall on its core-side arms and
+        ! re-enter, producing extra "strike" points that are NOT divertor
+        ! legs of their X-point (e.g. an HFS-midplane touch). Such a leg
+        ! is recognized geometrically: a genuine divertor leg leaves the
+        ! X-point towards the divertor, i.e. the strike lies on the far
+        ! side of the X-point from the core center; the grazing arms point
+        ! back towards the core and are dropped. This leaves the two real
+        ! divertor legs per X-point.
+        sp = topomesh%GetStrikePointIDs()
+        spx = topomesh%GetStrikePointXPointIDs()
+        call SOLPSCoreCenter(topomesh, xcen, ycen, okc)
+        allocate(candsp(size(sp)), candang(size(sp)), usedsp(size(sp)))
+        nstrike = 0
+        nviol = 0
+
+        ! One X-point at a time: gather its divertor-side strikes and keep
+        ! the two divertor legs. NOTE (edge cases still to handle): an SF+
+        ! X-point sitting in a PFR contributes no real target strikes, and
+        ! an SF0 X-point exactly on the original leg keeps its central
+        ! strike as the original one - neither is treated specially yet.
+        do ic = 1, size(xpverts)
+            xX = topomesh%vert%x(xpverts(ic))
+            yX = topomesh%vert%y(xpverts(ic))
+            ux = xX - xcen          ! divertor direction (away from core)
+            uy = yX - ycen
+            ncand = 0
+            do i = 1, size(sp)
+                if (spx(i) /= xpverts(ic)) cycle
+                xs = topomesh%vert%x(sp(i))
+                ys = topomesh%vert%y(sp(i))
+                ! drop core-side arms (grazing touches that point back
+                ! towards the core, not into the divertor)
+                if (okc) then
+                    if (((xs - xX)*ux + (ys - yX)*uy) <= 0.0_R8) cycle
+                end if
+                ncand = ncand + 1
+                candsp(ncand) = sp(i)
+                if (okc) then
+                    candang(ncand) = atan2( &
+                        ux*(ys - yX) - uy*(xs - xX), &
+                        ux*(xs - xX) + uy*(ys - yX))
+                else
+                    candang(ncand) = 0.0_R8
+                end if
+            end do
+
+            ! Keep only the two divertor legs = the two angular extremes
+            ! (the legs bounding the divertor/new PFR). Any central leg
+            ! between them is the separatrix continuation inside the new
+            ! PFR (a snowflake), not a target strike, and is dropped.
+            if (ncand > 2) then
+                imin = 1
+                imax = 1
+                do i = 2, ncand
+                    if (candang(i) < candang(imin)) imin = i
+                    if (candang(i) > candang(imax)) imax = i
+                end do
+                nused = 2
+                usedsp(1) = candsp(imin)
+                usedsp(2) = candsp(imax)
+            else
+                nused = ncand
+                do i = 1, ncand
+                    usedsp(i) = candsp(i)
+                end do
+            end if
+
+            ! Validate the two divertor legs against the declared targets
+            do i = 1, nused
+                xs = topomesh%vert%x(usedsp(i))
+                ys = topomesh%vert%y(usedsp(i))
+                nstrike = nstrike + 1
+                kbest = 0
+                dmin = posinfval_R8()
+                do k = 1, int(vessel%nstructures, kind=I8)
+                    d = StructureDistance(vessel, xs, ys, k)
+                    if (d < dmin) then
+                        dmin = d
+                        kbest = k
+                    end if
+                end do
+                ontarget = (kbest > 0) .and. (dmin <= tol)
+                if (ontarget) ontarget = allowed(kbest)
+                if ((.not. lists_ok) .or. (.not. ontarget)) then
+                    print *, trim(writer) // ': divertor-leg strike ' // &
+                        'at ', xs, ys, ' -> nearest wall structure ', &
+                        kbest, ' at ', dmin, ' m (on a declared ' // &
+                        'target: ', ontarget, ')'
+                    if (.not. ontarget) nviol = nviol + 1
+                end if
+            end do
+        end do
+
+        if (nstrike == 0) then
+            print *, trim(writer) // ': WARNING: no divertor-leg ' // &
+                'strike points found for the given X-point(s)'
+        end if
+
+        ! Record problems (do NOT fail here - the caller aggregates and
+        ! raises a single error, so the user sees every offending strike)
+        nproblems = nviol
+        if (.not. lists_ok) then
+            print *, trim(writer) // ': not all required divertor ' // &
+                'target lists (goat.vessel.solps_*_divertor_*_target) ' // &
+                'are given (non-empty)'
+            nproblems = max(nproblems, 1_I8)
+        elseif (nviol > 0) then
+            print *, trim(writer) // ': ', nviol, ' primary strike(s) ' // &
+                'are not on any declared divertor target'
+        end if
+
+    contains
+
+        ! Number of entries in target list `code`
+        function ListCount(code) result(n)
+            integer(I8), intent(in) :: code
+            integer(I8)             :: n
+            select case (code)
+            case (1)
+                n = int(vessel%nsolpsldi, kind=I8)
+            case (2)
+                n = int(vessel%nsolpsldo, kind=I8)
+            case (3)
+                n = int(vessel%nsolpsudi, kind=I8)
+            case (4)
+                n = int(vessel%nsolpsudo, kind=I8)
+            case default
+                n = 0
+            end select
+        end function
+
+        ! Mark the structures of target list `code` in `allowed`
+        subroutine MarkList(code)
+            integer(I8), intent(in) :: code
+            integer(I8)             :: ii
+            select case (code)
+            case (1)
+                do ii = 1, int(vessel%nsolpsldi, kind=I8)
+                    allowed(vessel%solpsldiind(ii)) = .true.
+                end do
+            case (2)
+                do ii = 1, int(vessel%nsolpsldo, kind=I8)
+                    allowed(vessel%solpsldoind(ii)) = .true.
+                end do
+            case (3)
+                do ii = 1, int(vessel%nsolpsudi, kind=I8)
+                    allowed(vessel%solpsudiind(ii)) = .true.
+                end do
+            case (4)
+                do ii = 1, int(vessel%nsolpsudo, kind=I8)
+                    allowed(vessel%solpsudoind(ii)) = .true.
+                end do
+            end select
+        end subroutine
+
+    end subroutine
+
+    ! Secondary (additional) X-point inventory and per-X-point divertor
+    ! labels. Identifies which X-points are the per-side-innermost
+    ! primaries and which are additional (snowflake/secondary nulls),
+    ! assigns the per-X divertor label array simgrid%data%xpDivLabel
+    ! (0 = primary; else the divertor index the additional X-point's
+    ! strike legs hit: SN 1..2 = inner/outer with the USN reversal,
+    ! CDN/DDN 1..4 clockwise from the lower inner divertor) and prints a
+    ! diagnostic inventory.
+    !
+    ! NOTE: for now this ONLY does the inventory + labels; it does NOT
+    ! yet create the additional volume regions (the wedge extraction is a
+    ! later step of the SECONDARY_XPOINT_REGIONS_PLAN). It never raises a
+    ! hard error: on any inconsistency it prints a warning and leaves the
+    ! label 0.
+    subroutine AddSecondaryXPointRegions(simgrid, topomesh, vessel)
+
+        ! Arguments
+        type(GridUDT), intent(inout)    :: simgrid
+        type(TopomeshUDT), intent(in)   :: topomesh
+        type(VesselUDT), intent(in)     :: vessel
+
+        ! Parameters
+        real(R8), parameter             :: dtolwall = 5.0e-3_R8
+
+        ! Auxiliary
+        integer(I8), allocatable        :: xp(:), sp(:), spx(:), &
+            reach(:), wfaces(:), iscompTM(:), wedgeof(:), &
+            wcells(:), wptr(:, :), addxi(:), addlab(:), addn(:), &
+            newreg(:), order(:), tfc(:), vf(:), bfc(:)
+        logical, allocatable            :: isprim(:), istLI(:), &
+            istLO(:), istUI(:), istUO(:), istany(:), barrier(:), &
+            seed(:), thisw(:), iscore(:), wacc(:)
+        logical                         :: okwall, badwall
+        real(R8), allocatable           :: addrho(:)
+        integer(I8)                     :: nxp, nc, nf, i, j, k, ia, &
+            ka, nadd, lab, kbest, nsvi, nregbase, ivadd, wtot, &
+            nfixed, nftpfr
+        real(R8)                        :: yc, fcore, xs, ys, &
+            xxa, yya, xcen, ycen, ux2, uy2, ax, ay, bx, by, &
+            wxm, wym, ang, angmin, angmax, cab, caw, cwb
+        integer(I8)                     :: sA, sB
+        logical                         :: isSN, isupper, ok, okref, okc
+        character(64)                   :: lbl, orient
+
+        lbl = simgrid%data%SOLPStopologylabel
+        orient = simgrid%data%SOLPStopologyorient
+        isSN = (trim(lbl) == 'GEOMETRY_SN')
+        isupper = (trim(orient) == 'upper')
+        nc = simgrid%cell%ntot
+        nf = simgrid%face%ntot
+
+        ! Ensure a valid (zero) label array of the right length
+        xp = topomesh%GetXPointIDs()
+        nxp = size(xp)
+        if (allocated(simgrid%data%xpDivLabel)) &
+            deallocate(simgrid%data%xpDivLabel)
+        allocate(simgrid%data%xpDivLabel(nxp))
+        simgrid%data%xpDivLabel = 0
+        if (nxp == 0) return
+
+        ! Reference + per-side-innermost (primary) X-points
+        call SOLPSReferenceCenterFlux(topomesh, yc, fcore, okref)
+        if (.not. okref) then
+            print *, 'AddSecondaryXPointRegions: no core reference - ' // &
+                'all X-points kept primary (label 0)'
+            return
+        end if
+        call ClassifyPrimaryXPoints(topomesh, xp, isprim, okref)
+        nadd = nxp - count(isprim)
+
+        print *, 'AddSecondaryXPointRegions: ', nxp, ' X-point(s): ', &
+            count(isprim), ' primary (per-side innermost), ', nadd, &
+            ' additional'
+        if (nadd == 0) then
+            print *, 'AddSecondaryXPointRegions: per-X divertor ' // &
+                'labels: ', simgrid%data%xpDivLabel
+            return
+        end if
+
+        ! Target structure masks (divertor-index mapping + wedge wall
+        ! validation); istany = the union of all four target lists
+        allocate(istLI(vessel%nstructures), istLO(vessel%nstructures), &
+            istUI(vessel%nstructures), istUO(vessel%nstructures), &
+            istany(vessel%nstructures))
+        istLI = .false.
+        istLO = .false.
+        istUI = .false.
+        istUO = .false.
+        do i = 1, int(vessel%nsolpsldi, kind=I8)
+            istLI(vessel%solpsldiind(i)) = .true.
+        end do
+        do i = 1, int(vessel%nsolpsldo, kind=I8)
+            istLO(vessel%solpsldoind(i)) = .true.
+        end do
+        do i = 1, int(vessel%nsolpsudi, kind=I8)
+            istUI(vessel%solpsudiind(i)) = .true.
+        end do
+        do i = 1, int(vessel%nsolpsudo, kind=I8)
+            istUO(vessel%solpsudoind(i)) = .true.
+        end do
+        istany = istLI .or. istLO .or. istUI .or. istUO
+
+        sp = topomesh%GetStrikePointIDs()
+        spx = topomesh%GetStrikePointXPointIDs()
+
+        ! Core cell mask (from the base cvReg the family writer left:
+        ! core = the SOLPS core region IDs 1 (SN) / 1 or 5 (DN)). Used
+        ! to sanity-check that a wedge never swallows core cells.
+        allocate(iscore(nc))
+        do i = 1, nc
+            iscore(i) = (simgrid%cell%reg(i) == 1) .or. &
+                ((.not. isSN) .and. (simgrid%cell%reg(i) == 5))
+        end do
+        nregbase = maxval(simgrid%cell%reg)
+
+        ! Per-additional-X arrays and the wedge bookkeeping
+        allocate(wedgeof(nc), barrier(nf), seed(nc), thisw(nc), wacc(nc), &
+            iscompTM(topomesh%face%ntot), wcells(nc), wptr(nadd, 2), &
+            addxi(nadd), addlab(nadd), addn(nadd), addrho(nadd), &
+            newreg(nadd), order(nadd))
+        wedgeof = 0
+        wtot = 0
+        ka = 0
+
+        ! ---- Phase 1: per additional X-point: divertor label + wedge ----
+        do ia = 1, nxp
+            if (isprim(ia)) cycle
+            ka = ka + 1
+            addxi(ka) = ia
+            addrho(ka) = abs(topomesh%vert%fval(xp(ia)) - fcore)
+
+            ! Divertor label = index of the target its strike legs hit
+            lab = 0
+            nsvi = 0
+            do j = 1, size(sp)
+                if (spx(j) /= xp(ia)) cycle
+                nsvi = nsvi + 1
+                xs = topomesh%vert%x(sp(j))
+                ys = topomesh%vert%y(sp(j))
+                kbest = NearestStructure(xs, ys)
+                if (kbest == 0) cycle
+                if (lab == 0) lab = DivertorIndex(kbest)
+            end do
+            simgrid%data%xpDivLabel(ia) = lab
+            addlab(ka) = lab
+
+            ! Wedge extraction: barriers = grid faces on this X's
+            ! separatrix component; seed the cells at the X grid vertex
+            ! on the target side; flood within the barriers.
+            call WalkSeparatrixComponent(topomesh, xp(ia), reach, &
+                wfaces, ok)
+            wptr(ka, 1) = wtot + 1
+            wptr(ka, 2) = 0
+            addn(ka) = 0
+            if (.not. ok) then
+                print *, 'AddSecondaryXPointRegions: WARNING: ' // &
+                    'separatrix walk failed for additional X-point ', &
+                    ia, ' - no wedge region created'
+                cycle
+            end if
+            iscompTM = 0
+            iscompTM(wfaces) = 1
+            do i = 1, nf
+                k = simgrid%face%TMfacelabel(i)
+                barrier(i) = .false.
+                if ((k >= 1) .and. (k <= topomesh%face%ntot)) then
+                    if (iscompTM(k) == 1) barrier(i) = .true.
+                end if
+            end do
+
+            xxa = topomesh%vert%x(xp(ia))
+            yya = topomesh%vert%y(xp(ia))
+
+            ! Wedge extraction (GENERAL -- no dependence on the specific case).
+            ! The new PFR of this X is the region its OWN separatrix component
+            ! cuts off near the wall. Rather than guessing which strikes are the
+            ! real legs (a core-directed arm can strike on the divertor side,
+            ! e.g. an SF- X sitting next to a DDN primary X), flood outward from
+            ! EVERY grid cell touching the X grid vertex, blocked by the
+            ! component. Each sector at the X floods either into a small ENCLOSED
+            ! lobe piece (kept) or into the big SOL/core rest (which reaches core
+            ! cells or most of the grid, and is rejected). The union of the kept
+            ! pieces is the wedge; this also merges the two halves of a wedge that
+            ! the central continuation over-splits. Works for any topology and any
+            ! number/position of the X's strikes.
+            ivadd = NearestGridVertex(xxa, yya)
+            vf = GetVertFace(simgrid%vert, ivadd)
+            wacc = .false.
+            do j = 1, size(vf)
+                tfc = GetFaceCell(simgrid%face, vf(j))
+                do k = 1, size(tfc)
+                    if (wacc(tfc(k))) cycle
+                    seed = .false.
+                    seed(tfc(k)) = .true.
+                    call FloodWedge()
+                    if (count(thisw) == 0) cycle
+                    if (any(thisw .and. iscore)) cycle    ! big SOL/core rest
+                    if (count(thisw) > nc/2) cycle         ! runaway (rest)
+                    ! A genuine private lobe touches the wall ONLY on declared
+                    ! target structures (its mouth is target wall by the
+                    ! preprocessing contract). A SOL pocket sealed by the
+                    ! separatrix arms can also be non-core and < nc/2, but it
+                    ! touches the MAIN (non-target) wall -> reject it, so only the
+                    ! true lobe(s) survive. Require at least one (target) wall
+                    ! face too, so a fully-interior pocket is not taken.
+                    okwall = .false.
+                    badwall = .false.
+                    do i = 1, nf
+                        if (.not. simgrid%face%BF(i)) cycle
+                        bfc = GetFaceCell(simgrid%face, i)
+                        if (.not. thisw(bfc(1))) cycle
+                        okwall = .true.
+                        xs = 0.5_R8*(simgrid%vert%x(simgrid%face%vert(i, 1)) + &
+                                     simgrid%vert%x(simgrid%face%vert(i, 2)))
+                        ys = 0.5_R8*(simgrid%vert%y(simgrid%face%vert(i, 1)) + &
+                                     simgrid%vert%y(simgrid%face%vert(i, 2)))
+                        kbest = NearestStructure(xs, ys)
+                        if ((kbest == 0) .or. (.not. istany(kbest))) then
+                            badwall = .true.
+                            exit
+                        end if
+                    end do
+                    if ((.not. okwall) .or. badwall) cycle
+                    wacc = wacc .or. thisw                 ! an enclosed lobe piece
+                end do
+            end do
+            thisw = wacc
+
+            if (count(thisw) == 0) then
+                print *, 'AddSecondaryXPointRegions: WARNING: no ' // &
+                    'enclosed wedge found for additional X-point ', ia, &
+                    ' - no wedge region created'
+                cycle
+            end if
+            do i = 1, nc
+                if (thisw(i)) then
+                    wtot = wtot + 1
+                    wcells(wtot) = i
+                end if
+            end do
+            wptr(ka, 2) = wtot - wptr(ka, 1) + 1
+            addn(ka) = wptr(ka, 2)
+            print *, 'AddSecondaryXPointRegions: additional X-point ', &
+                ia, ' at ', xxa, yya, ' label ', lab, ' -> wedge of ', &
+                addn(ka), ' cells'
+        end do
+
+        ! ---- Phase 2: assign wedgeof (largest first, so a nested ----
+        ! inner wedge, assigned last, wins its shared cells) ----
+        do i = 1, nadd
+            order(i) = i
+        end do
+        call SortWedges()          ! order() by addn descending
+        do i = 1, nadd
+            ka = order(i)
+            do j = wptr(ka, 1), wptr(ka, 1) + wptr(ka, 2) - 1
+                wedgeof(wcells(j)) = ka
+            end do
+        end do
+
+        ! ---- Phase 3: region numbering (spec 2.9): additional regions ----
+        ! appended after the basic NREG, ordered by (label asc, rho asc,
+        ! outer-first). Compute a rank per wedge. ----
+        do i = 1, nadd
+            order(i) = i
+        end do
+        call SortNumbering()       ! order() by (label, rho, -n)
+        newreg = 0
+        k = 0
+        do i = 1, nadd
+            ka = order(i)
+            if (addn(ka) == 0) cycle       ! no valid wedge -> no region
+            k = k + 1
+            newreg(ka) = nregbase + k
+        end do
+
+        ! ---- Phase 4: overwrite cvReg of the wedge cells ----
+        do i = 1, nc
+            if (wedgeof(i) > 0) then
+                if (newreg(wedgeof(i)) > 0) &
+                    simgrid%cell%reg(i) = newreg(wedgeof(i))
+            end if
+        end do
+
+        ! ---- Phase 5: face-region patches for wedge cells ----
+        ! (a) every boundary face adjacent to a wedge cell must be on a
+        !     declared target (spec 3.2 fail-fast);
+        ! (b) chain faces that end up interior to a wedge -> fcReg 0.
+        nfixed = 0
+        do i = 1, nf
+            if (simgrid%face%BF(i)) then
+                tfc = GetFaceCell(simgrid%face, i)
+                if (wedgeof(tfc(1)) == 0) cycle
+                ! wedge-adjacent boundary face: require a target wall
+                xs = 0.5_R8*(simgrid%vert%x(simgrid%face%vert(i, 1)) + &
+                             simgrid%vert%x(simgrid%face%vert(i, 2)))
+                ys = 0.5_R8*(simgrid%vert%y(simgrid%face%vert(i, 1)) + &
+                             simgrid%vert%y(simgrid%face%vert(i, 2)))
+                kbest = NearestStructure(xs, ys)
+                if (kbest == 0) then
+                    call gdErrorHandler('AddSecondaryXPointRegions: a ' // &
+                        'wedge (additional-PFR) boundary face is not ' // &
+                        'on any wall structure - extend the ' // &
+                        'goat.vessel.solps_*_target lists so the whole ' // &
+                        'wall span of every additional X-point is ' // &
+                        'declared target wall')
+                elseif (.not. istany(kbest)) then
+                    call gdErrorHandler('AddSecondaryXPointRegions: a ' // &
+                        'wedge (additional-PFR) boundary face lands on ' // &
+                        'a non-target wall structure - extend the ' // &
+                        'goat.vessel.solps_*_target lists to cover it')
+                end if
+            else
+                ! interior face fully inside a wedge that carried a chain
+                ! (entrance/cut) region -> reset to 0 ("split in two")
+                tfc = GetFaceCell(simgrid%face, i)
+                if (size(tfc) /= 2) cycle
+                if ((wedgeof(tfc(1)) > 0) .and. (wedgeof(tfc(2)) > 0) &
+                    .and. (simgrid%face%reg(i) /= 0)) then
+                    simgrid%face%reg(i) = 0
+                    nfixed = nfixed + 1
+                end if
+            end if
+        end do
+        if (nfixed > 0) print *, 'AddSecondaryXPointRegions: reset ', &
+            nfixed, ' interior chain faces inside wedges to fcReg 0'
+
+        ! ---- Phase 6: flux tubes fully inside a wedge -> ftReg 3 (PFR) ----
+        nftpfr = 0
+        associate(fd => simgrid%data%fluxdata)
+        do i = 1, fd%nFt
+            ok = .true.
+            do j = fd%fluxtubecellsP(i, 1), &
+                fd%fluxtubecellsP(i, 1) + fd%fluxtubecellsP(i, 2) - 1
+                if (wedgeof(fd%fluxtubecells(j)) == 0) then
+                    ok = .false.
+                    exit
+                end if
+            end do
+            if (ok) then
+                fd%fluxtuberegID(i) = 3
+                nftpfr = nftpfr + 1
+            end if
+        end do
+        end associate
+
+        print *, 'AddSecondaryXPointRegions: created ', k, &
+            ' additional volume region(s) ', nregbase + 1, '..', &
+            nregbase + k, '; ', nftpfr, ' flux tubes set to PFR'
+        print *, 'AddSecondaryXPointRegions: per-X divertor labels: ', &
+            simgrid%data%xpDivLabel
+
+    contains
+
+        ! Divertor index of structure kk: CDN/DDN 1..4 (LI/UI/UO/LO,
+        ! clockwise from the lower inner target), SN 1..2 (inner/outer,
+        ! reversed for an upper single null)
+        function DivertorIndex(kk) result(idx)
+            integer(I8), intent(in) :: kk
+            integer(I8)             :: idx
+            idx = 0
+            if (isSN) then
+                if (isupper) then
+                    if (istUO(kk)) idx = 1
+                    if (istUI(kk)) idx = 2
+                else
+                    if (istLI(kk)) idx = 1
+                    if (istLO(kk)) idx = 2
+                end if
+            else
+                if (istLI(kk)) idx = 1
+                if (istUI(kk)) idx = 2
+                if (istUO(kk)) idx = 3
+                if (istLO(kk)) idx = 4
+            end if
+        end function
+
+        ! Nearest wall sub-structure to (px,py) within dtolwall, else 0
+        function NearestStructure(px, py) result(ks)
+            real(R8), intent(in)    :: px, py
+            integer(I8)             :: ks, kk
+            real(R8)                :: dd, dm
+            ks = 0
+            dm = posinfval_R8()
+            do kk = 1, int(vessel%nstructures, kind=I8)
+                dd = StructureDistance(vessel, px, py, kk)
+                if (dd < dm) then
+                    dm = dd
+                    ks = kk
+                end if
+            end do
+            if (dm > dtolwall) ks = 0
+        end function
+
+        ! Nearest grid vertex to (px,py)
+        function NearestGridVertex(px, py) result(iv)
+            real(R8), intent(in)    :: px, py
+            integer(I8)             :: iv, ii
+            real(R8)                :: dd, dm
+            iv = 1
+            dm = posinfval_R8()
+            do ii = 1, simgrid%vert%ntot
+                dd = (simgrid%vert%x(ii) - px)**2 + &
+                     (simgrid%vert%y(ii) - py)**2
+                if (dd < dm) then
+                    dm = dd
+                    iv = ii
+                end if
+            end do
+        end function
+
+        ! Flood the wedge into thisw() from seed(), blocked by barrier()
+        ! faces (host-associated); wall (boundary) faces stop the fill.
+        subroutine FloodWedge()
+            integer(I8), allocatable    :: q(:), cfl(:), tfcl(:)
+            integer(I8)                 :: h, t, cq, jj, kk, cn
+            allocate(q(nc))
+            thisw = .false.
+            h = 0
+            t = 0
+            do jj = 1, nc
+                if (seed(jj) .and. (.not. thisw(jj))) then
+                    t = t + 1
+                    q(t) = jj
+                    thisw(jj) = .true.
+                end if
+            end do
+            h = 0
+            do while (h < t)
+                if (t > nc/2) exit     ! runaway: the big SOL/core rest, not a
+                                       ! lobe -- the caller rejects it on size
+                h = h + 1
+                cq = q(h)
+                cfl = GetCellFace(simgrid%cell, cq)
+                do jj = 1, size(cfl)
+                    if (simgrid%face%BF(cfl(jj))) cycle
+                    if (barrier(cfl(jj))) cycle
+                    tfcl = GetFaceCell(simgrid%face, cfl(jj))
+                    do kk = 1, size(tfcl)
+                        cn = tfcl(kk)
+                        if (cn == cq) cycle
+                        if (thisw(cn)) cycle
+                        thisw(cn) = .true.
+                        t = t + 1
+                        q(t) = cn
+                    end do
+                end do
+            end do
+        end subroutine
+
+        ! order() <- wedge indices sorted by cell count descending
+        subroutine SortWedges()
+            integer(I8) :: a, b, tmp
+            do a = 1, nadd - 1
+                do b = a + 1, nadd
+                    if (addn(order(b)) > addn(order(a))) then
+                        tmp = order(a); order(a) = order(b); order(b) = tmp
+                    end if
+                end do
+            end do
+        end subroutine
+
+        ! order() <- wedge indices sorted by (label asc, rho asc, n desc)
+        subroutine SortNumbering()
+            integer(I8) :: a, b, tmp
+            logical     :: swap
+            do a = 1, nadd - 1
+                do b = a + 1, nadd
+                    swap = .false.
+                    if (addlab(order(b)) < addlab(order(a))) then
+                        swap = .true.
+                    elseif (addlab(order(b)) == addlab(order(a))) then
+                        if (addrho(order(b)) < addrho(order(a)) - 1.0e-12_R8) then
+                            swap = .true.
+                        elseif (abs(addrho(order(b)) - addrho(order(a))) &
+                                <= 1.0e-12_R8) then
+                            if (addn(order(b)) > addn(order(a))) swap = .true.
+                        end if
+                    end if
+                    if (swap) then
+                        tmp = order(a); order(a) = order(b); order(b) = tmp
+                    end if
+                end do
+            end do
+        end subroutine
+
+    end subroutine
+
+    ! Reference center height and core-side flux value (as in
+    ! ClassifyBasicSOLPSCatalogTopology): from the O-point vertex when
+    ! the axis is meshed, otherwise from the core-cell centroid and the
+    ! core boundary faces. ok=.false. if there is no usable reference.
+    subroutine SOLPSReferenceCenterFlux(topomesh, yc, fcore, ok)
+        type(TopomeshUDT), intent(in)   :: topomesh
+        real(R8), intent(out)           :: yc, fcore
+        logical, intent(out)            :: ok
+        integer(I8), allocatable        :: op(:), cc(:), ccf(:), tmpi(:)
+        integer(I8)                     :: i
+        ok = .true.
+        yc = 0.0_R8
+        fcore = 0.0_R8
+        op = topomesh%GetOPointIDs()
+        if (size(op) == 1) then
+            yc = topomesh%vert%y(op(1))
+            fcore = topomesh%vert%fval(op(1))
+            return
+        end if
+        cc = topomesh%GetCoreCellIDs()
+        if (size(cc) == 0) then
+            ok = .false.
+            return
+        end if
+        allocate(tmpi(0))
+        do i = 1, size(cc)
+            tmpi = [tmpi, topomesh%cell%GetVert(cc(i))]
+        end do
+        yc = sum(topomesh%vert%y(tmpi))/real(size(tmpi), kind=R8)
+        deallocate(tmpi)
+        ccf = topomesh%GetCoreFaceIDs()
+        if (size(ccf) == 0) then
+            ok = .false.
+            return
+        end if
+        do i = 1, size(ccf)
+            fcore = fcore + 0.5_R8*( &
+                topomesh%vert%fval(topomesh%face%vert(ccf(i), 1)) + &
+                topomesh%vert%fval(topomesh%face%vert(ccf(i), 2)))
+        end do
+        fcore = fcore/real(size(ccf), kind=R8)
+    end subroutine
+
+    ! Core center point (R,Z): the O-point vertex when the axis is
+    ! meshed, otherwise the core-cell vertex centroid. ok=.false. when
+    ! there is no core. Used to tell a divertor leg (pointing away from
+    ! the core) from a secondary-separatrix grazing arm.
+    subroutine SOLPSCoreCenter(topomesh, xc, yc, ok)
+        type(TopomeshUDT), intent(in)   :: topomesh
+        real(R8), intent(out)           :: xc, yc
+        logical, intent(out)            :: ok
+        integer(I8), allocatable        :: op(:), cc(:), tmpi(:)
+        integer(I8)                     :: i
+        ok = .true.
+        xc = 0.0_R8
+        yc = 0.0_R8
+        op = topomesh%GetOPointIDs()
+        if (size(op) == 1) then
+            xc = topomesh%vert%x(op(1))
+            yc = topomesh%vert%y(op(1))
+            return
+        end if
+        cc = topomesh%GetCoreCellIDs()
+        if (size(cc) == 0) then
+            ok = .false.
+            return
+        end if
+        allocate(tmpi(0))
+        do i = 1, size(cc)
+            tmpi = [tmpi, topomesh%cell%GetVert(cc(i))]
+        end do
+        xc = sum(topomesh%vert%x(tmpi))/real(size(tmpi), kind=R8)
+        yc = sum(topomesh%vert%y(tmpi))/real(size(tmpi), kind=R8)
+    end subroutine
+
+    ! Flag the per-side-innermost (primary) X-points among the topomesh
+    ! saddles xp = topomesh%GetXPointIDs(): the one nearest in flux to
+    ! the core reference on each side (below/above yc). isprim is sized
+    ! like xp. ok=.false. if there is no usable reference.
+    subroutine ClassifyPrimaryXPoints(topomesh, xp, isprim, ok)
+        type(TopomeshUDT), intent(in)           :: topomesh
+        integer(I8), intent(in)                 :: xp(:)
+        logical, allocatable, intent(out)       :: isprim(:)
+        logical, intent(out)                    :: ok
+        real(R8)                                :: yc, fcore, d, dlow, dup
+        integer(I8)                             :: i, ilow, iup
+        allocate(isprim(size(xp)))
+        isprim = .false.
+        call SOLPSReferenceCenterFlux(topomesh, yc, fcore, ok)
+        if (.not. ok) return
+        ilow = 0
+        iup = 0
+        dlow = 0.0_R8
+        dup = 0.0_R8
+        do i = 1, size(xp)
+            d = abs(topomesh%vert%fval(xp(i)) - fcore)
+            if (topomesh%vert%y(xp(i)) >= yc) then
+                if ((iup == 0) .or. (d < dup)) then
+                    iup = i
+                    dup = d
+                end if
+            else
+                if ((ilow == 0) .or. (d < dlow)) then
+                    ilow = i
+                    dlow = d
+                end if
+            end if
+        end do
+        if (ilow > 0) isprim(ilow) = .true.
+        if (iup > 0) isprim(iup) = .true.
     end subroutine
 
     ! Minimum distance from a point to vessel sub-structure ks

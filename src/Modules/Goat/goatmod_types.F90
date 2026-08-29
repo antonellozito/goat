@@ -418,12 +418,21 @@ module goatmod_types
         integer(I8)                             :: topoflag
 
         ! SOLPS catalog topology label (diagnostic refinement of
-        ! topoflag; assigned by ClassifySOLPSCatalogTopology when the
-        ! configuration matches the one-O-point / max-four-X-point
-        ! catalog, otherwise 'UNKNOWN'). Internal only: not written
-        ! to any output file.
+        ! topoflag; assigned by ClassifyBasicSOLPSCatalogTopology when
+        ! the configuration matches the one-O-point / max-four-X-point
+        ! catalog, otherwise 'UNKNOWN'). Internal only: the label/orient
+        ! strings themselves are not written to any output file, but the
+        ! integer SOLPSgeometryID derived from them (below) is.
         character(len=64)                       :: SOLPStopologylabel = 'UNKNOWN'
         character(len=64)                       :: SOLPStopologyorient = 'n/a'
+
+        ! SOLPS geometry ID: the basic-family topology encoded as the
+        ! integer B2.5 uses internally (b2mod_geometry):
+        !   3 = LIMITER, 4 = SN, 5 = CDN, 6 = DDN bottom, 7 = DDN top,
+        !   13 = GENERAL (UNKNOWN topologies). Set from
+        !   SOLPStopologylabel in IdentifySOLPSTopology and written to
+        !   the traduit topology block (record GEOMETRY_ID).
+        integer(I8)                             :: SOLPSgeometryID = 13
 
         ! OMP & IMP
         integer(I8), allocatable, dimension(:)  :: OMPcell, OMPface, &
@@ -434,9 +443,15 @@ module goatmod_types
             IMPz
 
         ! X-point(s), strike points, o points, ...
+        ! xpDivLabel: per-X-point divertor label (aligned with xpointID),
+        !   0 = primary (per-side innermost) X-point, else the divertor
+        !   index the additional X-point's strike legs hit (1..2 for SN
+        !   with the USN reversal, 1..4 clockwise from the lower inner
+        !   divertor for CDN/DDN). Filled by AddSecondaryXPointRegions;
+        !   defaults to zeros. Written to the traduit topology block.
         integer(I8), allocatable, dimension(:)  :: xpointID, &
             spointID, opointID, tpointID, isprimaryxp, spointxpID, &
-            divFc, spointdivID, tpointdivID
+            divFc, spointdivID, tpointdivID, xpDivLabel
         integer(I8), allocatable, dimension(:, :)   :: divFcP
         integer(I8)                             :: nxp, nsp, nop, ntp, &
             ndiv, ndivFc
@@ -988,6 +1003,7 @@ module goatmod_types
         if (allocated(grid%data%divFc)) deallocate(grid%data%divFc)
         if (allocated(grid%data%spointdivID)) deallocate(grid%data%spointdivID)
         if (allocated(grid%data%tpointdivID)) deallocate(grid%data%tpointdivID)
+        if (allocated(grid%data%xpDivLabel)) deallocate(grid%data%xpDivLabel)
 
         ! Read data for structured grid remapping (to be deleted in future)
         call ReadArray (filespec,1,idum2,'isClassicalGrid')
@@ -1004,6 +1020,10 @@ module goatmod_types
             call ReadArray(filespec, 1, idum, 'topoflag')
             grid%data%topoflag = idum(0)
 
+            ! Read SOLPS geometry ID
+            call ReadArray(filespec, 1, idum, 'GEOMETRY_ID')
+            grid%data%SOLPSgeometryID = idum(0)
+
             ! Read number of topological points
             call ReadArray(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
             grid%data%nxp = idum(0)
@@ -1017,7 +1037,7 @@ module goatmod_types
             ! Allocate
             allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
                 grid%data%spointID(idum(2)), grid%data%tpointID(idum(3)), &
-                grid%data%isprimaryxp(idum(0)), &
+                grid%data%isprimaryxp(idum(0)), grid%data%xpDivLabel(idum(0)), &
                 grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
                 grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
                 grid%data%spointxpID(grid%data%nsp), grid%data%sepID(grid%data%nsep))
@@ -1028,6 +1048,13 @@ module goatmod_types
                 ! Read
                 read(filespec, *) grid%data%xpointID(i), grid%data%isprimaryxp(i), &
                     idum(0)
+            end do
+
+            ! Read per-X-point divertor label
+            call ReadSingleLine(filespec, chardummy, reachedeof) ! header
+            do i = 1, grid%data%nxp
+                ! Read
+                read(filespec, *) grid%data%xpDivLabel(i)
             end do
 
             ! Read O-point data
@@ -1067,6 +1094,7 @@ module goatmod_types
         else
             ! Initialize to zero
             grid%data%topoflag = 0
+            grid%data%SOLPSgeometryID = 13
             grid%data%nxp = 0
             grid%data%nop = 0
             grid%data%nsp = 0
@@ -1078,6 +1106,7 @@ module goatmod_types
             ! Allocate
             allocate(grid%data%xpointID(0), grid%data%opointID(0), &
                 grid%data%spointID(0), grid%data%isprimaryxp(0), &
+                grid%data%xpDivLabel(0), &
                 grid%data%divFcP(0, 2), grid%data%divFc(0), &
                 grid%data%spointdivID(0), grid%data%tpointdivID(0), &
                 grid%data%sepID(0))
@@ -2119,6 +2148,8 @@ module goatmod_types
             Tpoint          => grid%data%tpointID,  &
             TpointdivID     => grid%data%tpointdivID,   &
             topoflag        => grid%data%topoflag,  &
+            geometryID      => grid%data%SOLPSgeometryID,   &
+            xpDivLabel      => grid%data%xpDivLabel, &
             nX              => grid%data%nxp,       &
             nO              => grid%data%nop,       &
             nS              => grid%data%nsp,       &
@@ -2214,6 +2245,13 @@ module goatmod_types
             fmt = '(1'//Ifm//')'
             write(fu, fmt) topoflag
 
+            ! SOLPS geometry ID (basic-family topology as a B2.5
+            ! b2mod_geometry constant: 3/4/5/6/7/13)
+            tempstring = '*cf:    int                1    GEOMETRY_ID'
+            write(fu, '(a)' ) tempstring
+            fmt = '(1'//Ifm//')'
+            write(fu, fmt) geometryID
+
             ! Topological points information
             tempstring = '*cf:    int                6    nX,nO,nS,nT,nDiv,nDivFc'
             write(fu, '(a)' ) tempstring
@@ -2226,6 +2264,16 @@ module goatmod_types
             fmt = '(3'//Ifm//')'
             do i = 1, nX
                 write(fu, fmt) Xpoint(i), isprimaryxp(i), fieldlineID(Xpoint(i))
+            end do
+
+            ! Per-X-point divertor label (aligned with the X-point
+            ! block above): 0 = primary, else divertor index the
+            ! additional X-point belongs to
+            tempstring = '*cf: xpDivLabel'
+            write(fu, '(a)' ) tempstring
+            fmt = '(1'//Ifm//')'
+            do i = 1, nX
+                write(fu, fmt) xpDivLabel(i)
             end do
 
             ! O-point data
