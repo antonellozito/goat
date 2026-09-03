@@ -15,6 +15,7 @@ endif
 
 setenv MODULEPATH /toks/scratch/dpc/easybuild/modules/all:$MODULEPATH
 module load SuiteSparse/7.7.0-foss-2023b
+module load gcc/14
 
 setenv OMP_NUM_THREADS 4
 
