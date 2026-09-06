@@ -16216,7 +16216,7 @@ module ggmod_topology2D
 
     ! SOLPS catalog topology classification
     subroutine ClassifyBasicSOLPSCatalogTopology(topomesh, label, &
-        orient)
+        orient, excludedxp)
 
         ! Description
         !============
@@ -16246,12 +16246,20 @@ module ggmod_topology2D
         ! connectivity between the two per-side candidates is decided
         ! by a separatrix-component walk (a chain of separatrix
         ! faces), never by mere flux equality.
+        !
+        ! The optional excludedxp list (topomesh vertex IDs) removes
+        ! X-points from the classification entirely. It is used for
+        ! narrow (target-filtered) grids: a divertor region cut from
+        ! the delivered grid takes its X-point with it, and the
+        ! delivered SOLPS topology is that of the SURVIVING X-points
+        ! only.
 
         ! Declare variables
         !==================
         ! Arguments
         class(TopomeshUDT)              :: topomesh
         character(len=64), intent(out)  :: label, orient
+        integer(I8), intent(in), optional   :: excludedxp(:)
 
         ! Auxiliary
         integer(I8), allocatable        :: xp(:), op(:), cc(:), &
@@ -16259,6 +16267,7 @@ module ggmod_topology2D
         integer(I8)                     :: nxp, i, ilow, iup
         real(R8)                        :: yc, fcore, d, dlow, dup
         logical                         :: ok
+        logical, allocatable            :: keepx(:)
 
         ! Initialize
         !===========
@@ -16320,6 +16329,15 @@ module ggmod_topology2D
         ! Innermost = smallest flux distance from the O-point;
         ! sides = below/above the O-point
         xp = topomesh%GetXPointIDs()
+        if (present(excludedxp)) then
+            if ((size(excludedxp) > 0) .and. (size(xp) > 0)) then
+                allocate(keepx(size(xp)))
+                do i = 1, size(xp)
+                    keepx(i) = .not. any(excludedxp == xp(i))
+                end do
+                xp = pack(xp, keepx)
+            end if
+        end if
         nxp = size(xp)
         if (nxp == 0) then
             label = 'GEOMETRY_LIMITER'

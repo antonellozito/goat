@@ -4011,6 +4011,19 @@ module goatmod_types
             tcs = 0
             tcs = v%neigP(i, 2) - v%cellP(i, 2)
 
+            ! A filtered grid may retain an unused topological point solely
+            ! to preserve GOAT's topomesh-to-grid point numbering. It has no
+            ! interconnections to sort.
+            if (v%cellP(i, 2) == 0) then
+                if ((v%neigP(i, 2) /= 0) .or. &
+                    (v%faceP(i, 2) /= 0)) then
+                    call gdErrorHandler( &
+                        'ComputeGridInterconnections: orphan vertex has ' // &
+                        'faces or neighbours')
+                end if
+                cycle
+            end if
+
             ! Account for guard cells, if any
             if (accountforGC) then
                 tcs = tcs + count(c%GC(v%cell(v%cellP(i, 1):v%cellP(i, 2)+v%cellP(i, 1)-1)))

@@ -173,6 +173,13 @@ subroutine GGDriver(goatoptions)
 
     end do
 
+    ! Endpoint pinning must inspect the complete generated boundary. Apply the
+    ! narrow target-only wall-contact rule once, after that iteration converges.
+    if (topomeshoptions%removewidegridregions) then
+        call RemoveGeneratedGridNonTargetWallTubes(grid, topomesh, &
+            environment%vessel, magneticField, ggoptions)
+    end if
+
     ! Write data
     !===========
     ! Translate labels etc
@@ -187,7 +194,7 @@ subroutine GGDriver(goatoptions)
 
     ! Fort.78 file with void regions
     call ComputeVoidRegionPolygonSet(grid, topomesh, environment%triangulationvessel, &
-        ggtmdata, voidps)
+        ggtmdata, voidps, narrowgrid=topomeshoptions%removewidegridregions)
     call WriteVoidRegionFile(voidps, grid, 'fort.78')
     call WriteVoidRegionFileGoat(voidps, grid, 'fort_goat.78')
 

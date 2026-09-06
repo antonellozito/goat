@@ -467,7 +467,7 @@ contains
         logical, allocatable            :: issepTM(:), ismain(:), &
             istarget1(:), istarget4(:), ispfrhalf(:)
         real(R8), allocatable           :: compx(:), compy(:), &
-            zpsi(:)
+            zpsi(:), zcx(:), zcy(:)
         integer(I8)                     :: i, j, k, ich, iv, ivX, w, &
             f, fprev, lbl, c, c2, ncomp, nsolcomp, nqh, nqt, nmix, &
             nsepal, npfrhalf, fstart(4), chlen(4), termvx(4), &
@@ -486,6 +486,20 @@ contains
         ! X-point and reference directions
         !=================================
         xp = topomesh%GetXPointIDs()
+        ! Narrow-grid rule: an X-point whose flux surface was removed
+        ! from the delivered grid by the narrow-grid target filter
+        ! (orphaned grid vertex, fieldlineID 0) does not exist for the
+        ! SOLPS region conventions - drop it from the working list. On
+        ! a complete (wide) grid every X-point stays.
+        if (size(xp) > 0) then
+            if (any(simgrid%vert%fieldlineID(xp) <= 0)) then
+                print *, 'SetSOLPSRegionsSN: ignoring ', &
+                    count(simgrid%vert%fieldlineID(xp) <= 0), &
+                    ' X-point(s) without a flux surface in the ' // &
+                    'filtered grid'
+                xp = pack(xp, simgrid%vert%fieldlineID(xp) > 0)
+            end if
+        end if
         if (size(xp) == 0) then
             print *, 'SetSOLPSRegionsSN: no X-point in the ' // &
                 'topomesh - leaving the generic regions in place'
@@ -615,12 +629,18 @@ contains
         ! noise on the cells hugging the separatrix.
         allocate(zpsi(maxval(simgrid%cell%reg)), &
             zn(maxval(simgrid%cell%reg)), &
-            zkind(maxval(simgrid%cell%reg)))
+            zkind(maxval(simgrid%cell%reg)), &
+            zcx(maxval(simgrid%cell%reg)), &
+            zcy(maxval(simgrid%cell%reg)))
         zpsi = 0.0_R8
+        zcx = 0.0_R8
+        zcy = 0.0_R8
         zn = 0
         do i = 1, simgrid%cell%ntot
             k = simgrid%cell%reg(i)
             zpsi(k) = zpsi(k) + simgrid%cell%psi(i)
+            zcx(k) = zcx(k) + simgrid%cell%x(i)
+            zcy(k) = zcy(k) + simgrid%cell%y(i)
             zn(k) = zn(k) + 1
         end do
         psicore = 0.0_R8
@@ -639,14 +659,28 @@ contains
             return
         end if
         s = sign(1.0_R8, psiX - psicore/real(k, kind=R8))
+        ! PFR = flux core-side of the null AND on the divertor side of
+        ! the X-point (behind it, away from the core). The second
+        ! condition is redundant for a genuine single null, but on a
+        ! reclassified snowflake (narrow grid whose second divertor was
+        ! filtered away) the surviving companion separatrix runs a
+        ! fraction of a permille outside the primary one: upstream
+        ! zones of that inter-separatrix band have mean flux within
+        ! interpolation noise of psiX, and a flux-only test scatters
+        ! them into the PFR kind - they then flood-connect through the
+        ! X-region into a divertor region (cells of the main SOL ring
+        ! labeled as divertor all around the machine)
         do j = 1, size(zkind)
             zkind(j) = KSOL
             if (zn(j) == 0) cycle
             if (mod(j - SOLPScoreregID, SOLPScoreregIDincr) == 0) &
                 then
                 zkind(j) = KCORE
-            elseif (s*(zpsi(j)/real(zn(j), kind=R8) - psiX) < &
-                0.0_R8) then
+            elseif ((s*(zpsi(j)/real(zn(j), kind=R8) - psiX) < &
+                0.0_R8) .and. &
+                (((zcx(j)/real(zn(j), kind=R8) - xxp)*ux + &
+                  (zcy(j)/real(zn(j), kind=R8) - yxp)*uy) < &
+                0.0_R8)) then
                 zkind(j) = KPFR
             end if
         end do
@@ -1328,6 +1362,20 @@ contains
         ! The two X-points: innermost per side
         !=====================================
         xps = topomesh%GetXPointIDs()
+        ! Narrow-grid rule: an X-point whose flux surface was removed
+        ! from the delivered grid by the narrow-grid target filter
+        ! (orphaned grid vertex, fieldlineID 0) does not exist for the
+        ! SOLPS region conventions - drop it from the working list. On
+        ! a complete (wide) grid every X-point stays.
+        if (size(xps) > 0) then
+            if (any(simgrid%vert%fieldlineID(xps) <= 0)) then
+                print *, 'SetSOLPSRegionsDN: ignoring ', &
+                    count(simgrid%vert%fieldlineID(xps) <= 0), &
+                    ' X-point(s) without a flux surface in the ' // &
+                    'filtered grid'
+                xps = pack(xps, simgrid%vert%fieldlineID(xps) > 0)
+            end if
+        end if
         nxp = size(xps)
         ilow = 0
         iup = 0
@@ -2237,8 +2285,22 @@ contains
         nc = simgrid%cell%ntot
         nf = simgrid%face%ntot
 
-        ! Ensure a valid (zero) label array of the right length
+        ! Ensure a valid (zero) label array of the right length.
+        ! Narrow-grid rule: X-points without a flux surface in the
+        ! delivered grid (orphaned by the narrow-grid target filter,
+        ! fieldlineID 0) are dropped BEFORE sizing xpDivLabel, so the
+        ! labels stay aligned with the (equally pruned) X-point rows
+        ! of the traduit topology block.
         xp = topomesh%GetXPointIDs()
+        if (size(xp) > 0) then
+            if (any(simgrid%vert%fieldlineID(xp) <= 0)) then
+                print *, 'AddSecondaryXPointRegions: ignoring ', &
+                    count(simgrid%vert%fieldlineID(xp) <= 0), &
+                    ' X-point(s) without a flux surface in the ' // &
+                    'filtered grid'
+                xp = pack(xp, simgrid%vert%fieldlineID(xp) > 0)
+            end if
+        end if
         nxp = size(xp)
         if (allocated(simgrid%data%xpDivLabel)) &
             deallocate(simgrid%data%xpDivLabel)
