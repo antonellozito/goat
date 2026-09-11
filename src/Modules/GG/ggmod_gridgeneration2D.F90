@@ -1223,7 +1223,7 @@ module ggmod_gridgeneration2D
         !====================================
         ! Extract
         call ExtractSimulationGrid(simgrid, grid, magneticField, &
-            topomesh, ggtmdata)
+            topomesh, ggtmdata, options)
 
         ! Output
         if (present(ggtmdataopt)) then 
@@ -16351,7 +16351,7 @@ module ggmod_gridgeneration2D
 
     ! Simulation grid extraction
     subroutine ExtractSimulationGrid(simgrid, grid, magneticField, &
-        topomesh, ggtmdata)
+        topomesh, ggtmdata, options)
 
         ! Description
         !============
@@ -16372,6 +16372,7 @@ module ggmod_gridgeneration2D
         type(MagneticFieldUDT), intent(in)      :: magneticField
         class(TopomeshUDT), intent(in)          :: topomesh
         type(GGTMDataUDT), intent(in)           :: ggtmdata
+        type(GGOptionsUDT), optional, intent(in) :: options
 
         ! Auxiliary
         logical, allocatable, dimension(:)      :: hasfaceID
@@ -16546,7 +16547,7 @@ module ggmod_gridgeneration2D
 
         ! Additional grid data
         call ComputeGridData(simgrid, magneticField)
-        call ComputeTopologicalData(simgrid, topomesh)
+        call ComputeTopologicalData(simgrid, topomesh, options)
         call ComputeGoatGGData(simgrid, topomesh, ggtmdata)
 
         ! Grid boundary
@@ -17163,7 +17164,7 @@ module ggmod_gridgeneration2D
     end subroutine
 
     ! Compute topological data
-    subroutine ComputeTopologicalData(simgrid, topomesh)
+    subroutine ComputeTopologicalData(simgrid, topomesh, options)
 
         ! Description
         !============
@@ -17182,6 +17183,7 @@ module ggmod_gridgeneration2D
         ! Arguments
         type(GridUDT), intent(inout)            :: simgrid
         type(TopomeshUDT), intent(in)           :: topomesh
+        type(GGOptionsUDT), optional, intent(in) :: options
 
         ! Auxiliary
         integer(I8)                             :: tp, &
@@ -17201,6 +17203,17 @@ module ggmod_gridgeneration2D
         !===================
         ! Determine topological mesh type
         simgrid%data%topoflag = IdentifyTopologicalMeshType(topomesh)
+        if (present(options)) then
+            if (options%forceSOLPStopology) then
+                select case (options%SOLPStopology)
+                case ('general', 'General', 'GENERAL')
+                    if (simgrid%data%topoflag /= TMTopGeneral) then
+                        print *, 'Forcing general SOLPS topology...'
+                    end if
+                    simgrid%data%topoflag = TMTopGeneral
+                end select
+            end if
+        end if
 
         ! Basic X-, O-, S-, T-point data
         simgrid%data%xpointID = topomesh%GetXPointIDs()
@@ -18374,6 +18387,10 @@ module ggmod_gridgeneration2D
         !   boundaries next to them, (non-target) values elsewhere (0 in domain)
         ! - Assumed only one vessel polygon 
         ! - cvReg: everywhere equal to 1
+        !
+        ! Limiter:
+        ! - fcReg: same open-boundary remapping as linear
+        ! - cvReg: core cells map to 1, all non-core cells map to 2
 
         ! Single x: 
         ! - fcReg: 1, 4 for two targets, random (non-target) values elsewhere (0 in domain)
@@ -18427,6 +18444,8 @@ module ggmod_gridgeneration2D
         ! Print
         if (TMTop == TMTopL) then 
             print *, 'Identified a linear topology'
+        elseif (TMTop == TMTopLM) then
+            print *, 'Identified a limiter topology'
         elseif (TMTop == TMTopSN) then
             print *, 'Identified a single null topology'
         elseif (TMTop == TMTopDN) then 
@@ -18442,12 +18461,26 @@ module ggmod_gridgeneration2D
             ! Check which one to use
             select case (options%SOLPStopology)
 
+            case ('general', 'General', 'GENERAL')
+
+                if (TMTop /= TMTopGeneral) then
+                    print *, 'attempting to force general topology...'
+                    TMTop = TMTopGeneral
+                end if
+
             case ('linear', 'L', 'l')
 
                 if (TMTop /= TMTopL) then 
                     print *, 'attempting to force linear topology...'
                     TMTop = TMTopL
                 end if 
+
+            case ('limiter', 'Limiter', 'LM', 'lm')
+
+                if (TMTop /= TMTopLM) then
+                    print *, 'attempting to force limiter topology...'
+                    TMTop = TMTopLM
+                end if
 
             case ('single_null', 'SN', 'sn')
 
@@ -18469,6 +18502,7 @@ module ggmod_gridgeneration2D
 
             end select
         end if 
+        simgrid%data%topoflag = TMTop
 
         ! Remap cvReg
         !============
@@ -18478,6 +18512,17 @@ module ggmod_gridgeneration2D
 
             ! Simply one everywhere
             simgrid%cell%reg = 1
+
+        case (TMTopLM)
+
+            ! Preserve the SOLPS core region and collapse every non-core
+            ! region to a single SOL region. B2.5 identifies limiter
+            ! geometry from two cell regions.
+            where (mod(simgrid%cell%reg - SOLPScoreregID, SOLPScoreregIDincr) == 0)
+                simgrid%cell%reg = 1
+            elsewhere
+                simgrid%cell%reg = 2
+            end where
 
         case default 
 
@@ -18492,7 +18537,7 @@ module ggmod_gridgeneration2D
         ! Remap for each case
         select case (TMTop)
 
-        case (TMTopL)
+        case (TMTopL, TMTopLM)
 
             ! Select an open topomesh tube
             tubeID = 1
@@ -20924,4 +20969,4 @@ module ggmod_gridgeneration2D
     end subroutine
 
 
-end module 
+end module
