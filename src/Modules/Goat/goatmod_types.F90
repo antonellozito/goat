@@ -2304,8 +2304,8 @@ module goatmod_types
             tempstring  = '*cf: divFcP1 divFcP2'
             write(fu, '(a)' ) tempstring
             do i = 1, nDiv
-                fmt = '(2'//Ifm//')'
-                write (fu, fmt) divFcP(i, 1), divFcP(i, 2)
+                fmt = '(3'//Ifm//')'
+                write (fu, fmt) i, divFcP(i, 1), divFcP(i, 2)
             end do
 
             ! Divertor face list
