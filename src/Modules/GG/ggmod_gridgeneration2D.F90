@@ -17115,6 +17115,10 @@ module ggmod_gridgeneration2D
         integer(I8)                             :: i, j, k, cc, ncell, &
             nface
 
+        ! Terminal-face disambiguation for pinned corner cells (>1 boundary face)
+        integer(I8)                             :: fref, fbest, kk
+        real(R8)                                :: rvx, rvy, cvx, cvy, dabs, dbest
+
         ! Initialize
         !===========
         associate(&
@@ -17383,13 +17387,30 @@ module ggmod_gridgeneration2D
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the starting cell (number: ', ftc(1), &
                         ' ) has no boundary faces. Not adding face'
-                elseif (size(tcf) > 1) then 
-                    ! Unexpected, may be an issue
-                    hasbndf1(i) = .false.
-                    print *, 'ComputeGridData: flux tube: ', i, &
-                        ' is not closed but the starting cell (number: ', ftc(1), &
-                        ' ) has multiple boundary faces. Not adding face'
-                end if 
+                elseif (size(tcf) > 1) then
+                    ! A pinned structure-endpoint corner cell can carry more than
+                    ! one boundary poloidal face.  The open tube needs exactly one
+                    ! terminal face here: pick the candidate most nearly parallel to
+                    ! the adjacent inner poloidal face (same criterion as the
+                    ! marcher in BuildOpenTubesUS), so the flux-tube chain stays
+                    ! complete (every cell keeps exactly two in-tube faces).
+                    fref = ftf(1)
+                    rvx = v%x(f%vert(fref, 2)) - v%x(f%vert(fref, 1))
+                    rvy = v%y(f%vert(fref, 2)) - v%y(f%vert(fref, 1))
+                    fbest = tcf(1)
+                    dbest = -1.0_R8
+                    do kk = 1, size(tcf)
+                        cvx = v%x(f%vert(tcf(kk), 2)) - v%x(f%vert(tcf(kk), 1))
+                        cvy = v%y(f%vert(tcf(kk), 2)) - v%y(f%vert(tcf(kk), 1))
+                        dabs = abs(rvx*cvx + rvy*cvy) / &
+                            sqrt((rvx*rvx + rvy*rvy)*(cvx*cvx + cvy*cvy) + 1.0e-30_R8)
+                        if (dabs > dbest) then
+                            dbest = dabs
+                            fbest = tcf(kk)
+                        end if
+                    end do
+                    ftf = [fbest, ftf]
+                end if
 
                 ! Find boundary face(s) of last cell
                 tcf = GetCellFace(c, ftc(nftc))
@@ -17407,13 +17428,27 @@ module ggmod_gridgeneration2D
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the ending cell (number: ', ftc(1), &
                         ' ) has no boundary faces. Not adding face'
-                elseif (size(tcf) > 1) then 
-                    ! Unexpected, may be an issue
-                    hasbndf2(i) = .false.
-                    print *, 'ComputeGridData: flux tube: ', i, &
-                        ' is not closed but the ending cell (number: ', ftc(1), &
-                        ' ) has multiple boundary faces. Not adding face'
-                end if 
+                elseif (size(tcf) > 1) then
+                    ! See the starting-cell case above: a pinned corner cell may
+                    ! have several boundary poloidal faces; add the single terminal
+                    ! most nearly parallel to the adjacent inner poloidal face.
+                    fref = ftf(size(ftf))
+                    rvx = v%x(f%vert(fref, 2)) - v%x(f%vert(fref, 1))
+                    rvy = v%y(f%vert(fref, 2)) - v%y(f%vert(fref, 1))
+                    fbest = tcf(1)
+                    dbest = -1.0_R8
+                    do kk = 1, size(tcf)
+                        cvx = v%x(f%vert(tcf(kk), 2)) - v%x(f%vert(tcf(kk), 1))
+                        cvy = v%y(f%vert(tcf(kk), 2)) - v%y(f%vert(tcf(kk), 1))
+                        dabs = abs(rvx*cvx + rvy*cvy) / &
+                            sqrt((rvx*rvx + rvy*rvy)*(cvx*cvx + cvy*cvy) + 1.0e-30_R8)
+                        if (dabs > dbest) then
+                            dbest = dabs
+                            fbest = tcf(kk)
+                        end if
+                    end do
+                    ftf = [ftf, fbest]
+                end if
             else 
                 ! Closed tube
                 fd%isclosedft(i) = .true. 
