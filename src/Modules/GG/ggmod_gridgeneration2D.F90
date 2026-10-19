@@ -1065,6 +1065,12 @@ module ggmod_gridgeneration2D
         real(R8)                                :: cx, cy, perp, t, bestperp, &
             dmin, seglen, bestseglen
 
+        ! Node actually inserted (the endpoint itself, or its projection onto
+        ! the wall chord when the endpoint would fold the cell) and the split
+        ! applied to the rebuilt cell (0: kept whole; k: along node-rot(k))
+        real(R8)                                :: nx, ny
+        integer(I8)                             :: ksplit
+
         ! A corner is accepted onto its nearest interior wall face only if its
         ! perpendicular offset is small both in absolute terms and relative to
         ! that face's length. Genuine wall junctions (even ones where the wall
@@ -1131,21 +1137,11 @@ module ggmod_gridgeneration2D
             c = FindCell(av, bv)
             if (c == 0) cycle
             if (cvp2(c) > 4) cycle
-
-            ! Insert the corner into the ggtmdata boundary line FIRST; only
-            ! proceed with the grid split if that succeeds (keeps them in sync)
-            vid = nvert + 1
-            if (.not. InsertCornerInLine(lbl, av, bv, vid, cx, cy)) cycle
-
-            ! Commit immediately. Add the new vertex and the two wall sub-faces
-            ! (both keep the wall label/region); split the wall face; rebuild
-            ! the adjacent cell to route through the corner. Add before remove
-            ! so cell/face references stay valid, then compact.
-            call grid%AddVert([cx], [cy], [0_I8])
-            grid%vert%ntot = grid%vert%x%Size()
             lb = cvp1(c); m = cvp2(c)
+            vid = nvert + 1
 
-            ! Adjacent cell loop with the corner spliced in on the wall edge
+            ! Adjacent cell loop with the new node spliced in on the wall edge,
+            ! and the same loop rotated to start at the node (rot(1) == vid)
             allocate(newloop(0))
             do k = 1, m
                 newloop = [newloop, cvert(lb + k - 1)]
@@ -1154,33 +1150,91 @@ module ggmod_gridgeneration2D
                     newloop = [newloop, vid]
                 end if
             end do
+            pv = findloc(newloop == vid, .true., 1)
+            rot = [newloop(pv:), newloop(1:pv-1)]
+
+            ! Choose where the node goes and how the rebuilt cell is split so
+            ! that every resulting cell is valid (PfcSpliceValid), before
+            ! anything is modified. First the endpoint itself, as originally:
+            ! a triangle becomes a quad (kept whole; a simple non-convex quad is
+            ! split later by SplitNonConvexCells), a quad becomes a pentagon
+            ! split into triangle + quad along a diagonal from the node.
+            ! A grazing endpoint may however lie on the cell side of the wall
+            ! chord BEYOND the cell's opposite side (thin divertor-fan cells):
+            ! splicing it there folds the cell into a self-intersecting polygon,
+            ! which SplitNonConvexCells cannot repair and B2.5 rejects
+            ! (b2agfs: cell not convex / b2agmt: invalid face geometry). Such
+            ! an endpoint is still pinned: its node is placed at its projection
+            ! onto the wall chord, which splits the wall face at the same
+            ! arclength (the structure junction is still resolved), and the cell
+            ! is split along a diagonal from the node into valid cells.
+            nx = cx; ny = cy; ksplit = -1
+            if (size(rot) <= 4) then
+                if (PfcSpliceValid(rot, nx, ny, 0_I8)) ksplit = 0
+            else
+                if (PfcSpliceValid(rot, nx, ny, 3_I8)) then
+                    ksplit = 3
+                else if (PfcSpliceValid(rot, nx, ny, 4_I8)) then
+                    ksplit = 4
+                end if
+            end if
+            if (ksplit < 0) then
+                call SegProj(cx, cy, vx(av), vy(av), vx(bv), vy(bv), perp, t)
+                nx = vx(av) + t*(vx(bv) - vx(av))
+                ny = vy(av) + t*(vy(bv) - vy(av))
+                if (PfcSpliceValid(rot, nx, ny, 3_I8)) then
+                    ksplit = 3
+                else if (size(rot) > 4) then
+                    if (PfcSpliceValid(rot, nx, ny, 4_I8)) ksplit = 4
+                end if
+                if (ksplit > 0) print *, 'PinFanCorners: endpoint at (', cx, &
+                    ',', cy, ') would fold its wall cell; node placed on the ', &
+                    'wall chord at (', nx, ',', ny, ')'
+            end if
+            if (ksplit < 0) then
+                print *, 'PinFanCorners: WARNING endpoint at (', cx, ',', cy, &
+                    ') not pinned: no valid split of its wall cell'
+                deallocate(newloop, rot)
+                cycle
+            end if
+
+            ! Insert the node into the ggtmdata boundary line FIRST; only
+            ! proceed with the grid split if that succeeds (keeps them in sync)
+            if (.not. InsertCornerInLine(lbl, av, bv, vid, nx, ny)) then
+                deallocate(newloop, rot)
+                cycle
+            end if
+
+            ! Commit immediately. Add the new vertex and the two wall sub-faces
+            ! (both keep the wall label/region); split the wall face; rebuild
+            ! the adjacent cell to route through the node. Add before remove
+            ! so cell/face references stay valid, then compact.
+            call grid%AddVert([nx], [ny], [0_I8])
+            grid%vert%ntot = grid%vert%x%Size()
 
             ! Split the wall face in two
             call grid%AddFace(reshape([av, vid, vid, bv], [2, 2]), &
                 [lbl, lbl], [freg(f), freg(f)])
 
-            if (size(newloop) <= 4) then
+            if (ksplit == 0) then
                 ! Triangle -> quad: one cell, no interior face
                 call grid%AddCell(newloop, &
                     reshape([1_I8, int(size(newloop), I8)], [1, 2]), [creg(c)])
             else
-                ! Quad -> pentagon is unsupported downstream (SplitNonConvexCells
-                ! only handles <=4 verts). Split into a triangle + quad along a
-                ! diagonal from the corner. That diagonal is interior in every
-                ! case: the only possible reflex vertex of the pentagon is the
-                ! corner itself, and diagonals from a reflex vertex stay inside.
-                ! Add it as an interior face (label 0, cell region).
-                pv = findloc(newloop == vid, .true., 1)
-                rot = [newloop(pv:), newloop(1:pv-1)]   ! rot(1) == vid
-                call grid%AddCell([rot(1), rot(2), rot(3)], &
-                    reshape([1_I8, 3_I8], [1, 2]), [creg(c)])
-                call grid%AddCell([rot(1), rot(3), rot(4), rot(5)], &
-                    reshape([1_I8, 4_I8], [1, 2]), [creg(c)])
-                call grid%AddFace(reshape([rot(1), rot(3)], [1, 2]), &
+                ! Split along the diagonal node-rot(ksplit) into rot(1:ksplit)
+                ! and [rot(1), rot(ksplit:)] (quad -> pentagon is unsupported
+                ! downstream, SplitNonConvexCells only handles <=4 vertices); add
+                ! the diagonal as an interior face (label 0, cell region). For a
+                ! pentagon with ksplit = 3 this is the original triangle + quad.
+                call grid%AddCell(rot(1:ksplit), &
+                    reshape([1_I8, ksplit], [1, 2]), [creg(c)])
+                call grid%AddCell([rot(1), rot(ksplit:)], &
+                    reshape([1_I8, int(size(rot), I8) - ksplit + 2_I8], [1, 2]), &
+                    [creg(c)])
+                call grid%AddFace(reshape([rot(1), rot(ksplit)], [1, 2]), &
                     [0_I8], [creg(c)])
-                deallocate(rot)
             end if
-            deallocate(newloop)
+            deallocate(newloop, rot)
 
             call RemoveGGCell(grid, [c])
             call RemoveGGFace(grid, [f])
@@ -1205,6 +1259,99 @@ module ggmod_gridgeneration2D
             t = max(0.0_R8, min(1.0_R8, t))
             perp = hypot(px - (x1+t*dx), py - (y1+t*dy))
         end subroutine
+
+        ! Validity of the cell(s) produced by splicing a new wall node at
+        ! (nx,ny) into a cell: loop(1) is the new node, loop(2:) the original
+        ! cell in its own vertex order (coordinates from the grid snapshot).
+        ! With ksplit = 0 the spliced cell is kept whole; with ksplit = k
+        ! (3 <= k <= n-1) it is split along the diagonal loop(1)-loop(k) into
+        ! loop(1:k) and [loop(1), loop(k:)]. The spliced loop and every
+        ! resulting cell must be simple polygons with the orientation of the
+        ! original cell and a non-negligible area, so a folded (self-
+        ! intersecting), inverted or overlapping cell can never be produced.
+        function PfcSpliceValid(loop, nx, ny, ksplit) result(ok)
+            integer(I8), intent(in) :: loop(:), ksplit
+            real(R8), intent(in)    :: nx, ny
+            logical                 :: ok
+            real(R8), allocatable   :: px(:), py(:)
+            real(R8)                :: a0, amin
+            integer(I8)             :: n, q
+            ok = .false.
+            n = size(loop)
+            if (n < 4) return
+            allocate(px(n), py(n))
+            px(1) = nx; py(1) = ny
+            do q = 2, n
+                px(q) = vx(loop(q)); py(q) = vy(loop(q))
+            end do
+            a0 = PfcArea(px(2:n), py(2:n))
+            if (abs(a0) <= tiny(1.0_R8)) return
+            amin = 1.0e-6_R8*abs(a0)
+            ok = PfcCellOK(px, py, a0, amin)
+            if (.not. ok .or. ksplit == 0) return
+            if (ksplit < 3 .or. ksplit > n-1) then
+                ok = .false.; return
+            end if
+            ok = PfcCellOK(px(1:ksplit), py(1:ksplit), a0, amin)
+            if (ok) ok = PfcCellOK([px(1), px(ksplit:n)], &
+                [py(1), py(ksplit:n)], a0, amin)
+        end function
+
+        ! A (sub-)cell is acceptable if it keeps the orientation of the
+        ! original cell (signed area a0), has a non-negligible area and no two
+        ! of its edges cross.
+        function PfcCellOK(px, py, a0, amin) result(ok)
+            real(R8), intent(in) :: px(:), py(:), a0, amin
+            logical              :: ok
+            real(R8)             :: a
+            a = PfcArea(px, py)
+            ok = (a*a0 > 0.0_R8) .and. (abs(a) > amin)
+            if (ok) ok = PfcSimple(px, py)
+        end function
+
+        ! Signed (shoelace) area of a polygon
+        function PfcArea(px, py) result(a)
+            real(R8), intent(in) :: px(:), py(:)
+            real(R8)             :: a
+            integer              :: q, q2, n
+            n = size(px); a = 0.0_R8
+            do q = 1, n
+                q2 = mod(q, n) + 1
+                a = a + px(q)*py(q2) - px(q2)*py(q)
+            end do
+            a = 0.5_R8*a
+        end function
+
+        ! True if no two non-adjacent edges of the polygon cross
+        function PfcSimple(px, py) result(simple)
+            real(R8), intent(in) :: px(:), py(:)
+            logical              :: simple
+            integer              :: n, i, j, i2, j2
+            n = size(px); simple = .true.
+            do i = 1, n
+                i2 = mod(i, n) + 1
+                do j = i + 1, n
+                    j2 = mod(j, n) + 1
+                    if (j == i2 .or. j2 == i) cycle    ! adjacent edges
+                    if (PfcSegCross(px(i), py(i), px(i2), py(i2), &
+                                    px(j), py(j), px(j2), py(j2))) then
+                        simple = .false.; return
+                    end if
+                end do
+            end do
+        end function
+
+        ! Proper crossing of segments (x1,y1)-(x2,y2) and (x3,y3)-(x4,y4)
+        function PfcSegCross(x1, y1, x2, y2, x3, y3, x4, y4) result(cross)
+            real(R8), intent(in) :: x1, y1, x2, y2, x3, y3, x4, y4
+            logical              :: cross
+            real(R8)             :: d1, d2, d3, d4
+            d1 = (x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)
+            d2 = (x4-x3)*(y2-y3) - (y4-y3)*(x2-x3)
+            d3 = (x2-x1)*(y3-y1) - (y2-y1)*(x3-x1)
+            d4 = (x2-x1)*(y4-y1) - (y2-y1)*(x4-x1)
+            cross = (d1*d2 < 0.0_R8) .and. (d3*d4 < 0.0_R8)
+        end function
 
         ! A cell whose vertex loop contains the consecutive edge {u,w}; 0 if none
         function FindCell(u, w) result(ci)
