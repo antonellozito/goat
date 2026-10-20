@@ -123,7 +123,6 @@ module ggmod_gridgeneration2D
         ComputeTopologicalData, GetGridFaceLabelMappingGD, &
         ComputeVoidRegionPolygonSet, WriteVoidRegionFile, GGTMDataUDT, &
         WriteVoidRegionFileGoat, UpdateVoidRegionCoordinates, ReadVoidRegionFileGoat, &
-        CollectStructureEndpoints, FindDeficientStructureEndpoints, &
         RemoveGeneratedGridNonTargetWallTubes
 
     ! Module parameters
@@ -775,649 +774,6 @@ module ggmod_gridgeneration2D
     !                     GRID GENERATION DRIVERS                      !
     !------------------------------------------------------------------!
 
-    ! Collect the unique endpoints of all vessel sub-structures. For a
-    ! closed contour made of several sub-structures these are the junction
-    ! points where consecutive sub-structures meet; they are the points at
-    ! which grid nodes should be pinned. Endpoints coinciding within dtol are
-    ! returned once.
-    subroutine CollectStructureEndpoints(vessel, ex, ey)
-
-        ! Arguments
-        type(VesselUDT), intent(in)             :: vessel
-        real(R8), allocatable, intent(out)      :: ex(:), ey(:)
-
-        ! Local
-        integer(I8)                             :: is, np, e
-        real(R8)                                :: px, py
-        real(R8), parameter                     :: dtol = 1e-6_R8
-
-        allocate(ex(0), ey(0))
-        do is = 1, vessel%nstructures
-            np = vessel%structures(is)%np
-            if (np < 2) cycle
-            do e = 1, 2
-                if (e == 1) then
-                    px = vessel%structures(is)%x(1)
-                    py = vessel%structures(is)%y(1)
-                else
-                    px = vessel%structures(is)%x(np)
-                    py = vessel%structures(is)%y(np)
-                end if
-                if (size(ex) > 0) then
-                    if (any((ex - px)**2 + (ey - py)**2 < dtol**2)) cycle
-                end if
-                ex = [ex, px]
-                ey = [ey, py]
-            end do
-        end do
-
-    end subroutine
-
-    ! Find structure endpoints whose nearest grid boundary node is farther
-    ! than 'tol' away MEASURED ALONG THE WALL CONTOUR, and that have not yet
-    ! been forced (present in alreadyx/alreadyy). These are the endpoints that
-    ! still need a flux surface forced through them. The along-contour distance
-    ! is measured only along sub-structures incident to the endpoint, so a node
-    ! that is Euclidean-close but around a corner (on a different sub-structure)
-    ! does NOT count as close.
-    subroutine FindDeficientStructureEndpoints(simgrid, vessel, tol, defx, defy)
-
-        ! Arguments
-        type(GridUDT), intent(in)               :: simgrid
-        type(VesselUDT), intent(in)             :: vessel
-        real(R8), intent(in)                    :: tol
-        real(R8), allocatable, intent(out)      :: defx(:), defy(:)
-
-        ! Local
-        real(R8), allocatable, dimension(:)     :: ex, ey, bx, by
-        real(R8)                                :: gap, perp, arc, total, arcP
-        real(R8)                                :: px, py
-        integer(I8)                             :: i, is, np, q
-        logical                                 :: atstart, atend
-        real(R8), parameter                     :: dtol = 1e-6_R8    ! endpoint coincidence
-        real(R8), parameter                     :: perptol = 1e-4_R8 ! node-on-substructure
-
-        allocate(defx(0), defy(0))
-
-        ! Grid boundary node coordinates (vertices of boundary faces)
-        call CollectBoundaryNodes(simgrid, bx, by)
-        if (size(bx) == 0) return
-
-        ! All structure endpoints
-        call CollectStructureEndpoints(vessel, ex, ey)
-
-        do i = 1, size(ex)
-            px = ex(i); py = ey(i)
-
-            ! Minimum along-contour distance from this endpoint to a boundary node
-            gap = huge(1.0_R8)
-            do is = 1, vessel%nstructures
-                np = vessel%structures(is)%np
-                if (np < 2) cycle
-                ! Is this endpoint the start or end of substructure `is`?
-                atstart = (vessel%structures(is)%x(1)-px)**2 + &
-                          (vessel%structures(is)%y(1)-py)**2 < dtol**2
-                atend   = (vessel%structures(is)%x(np)-px)**2 + &
-                          (vessel%structures(is)%y(np)-py)**2 < dtol**2
-                if (.not. (atstart .or. atend)) cycle
-                ! Project every boundary node onto this substructure polyline
-                do q = 1, size(bx)
-                    call ProjectOntoPolyline(bx(q), by(q), &
-                        vessel%structures(is)%x(1:np), &
-                        vessel%structures(is)%y(1:np), perp, arc, total)
-                    if (perp > perptol) cycle
-                    if (atstart) then
-                        arcP = arc
-                    else
-                        arcP = total - arc
-                    end if
-                    if (arcP < gap) gap = arcP
-                end do
-            end do
-
-            ! Deficient if no node within tol along the contour
-            if (gap > tol) then
-                defx = [defx, px]
-                defy = [defy, py]
-            end if
-        end do
-
-    contains
-
-        ! Perpendicular distance of (qx,qy) to polyline (px,py) and the
-        ! arc-length of the closest projection measured from the polyline start.
-        subroutine ProjectOntoPolyline(qx, qy, px, py, perp, arc, total)
-            real(R8), intent(in)  :: qx, qy, px(:), py(:)
-            real(R8), intent(out) :: perp, arc, total
-            integer(I8)           :: k
-            real(R8)              :: dx, dy, seglen2, seglen, t, projx, projy, d, cum
-            perp = huge(1.0_R8); arc = 0.0_R8; cum = 0.0_R8
-            do k = 1, size(px)-1
-                dx = px(k+1) - px(k)
-                dy = py(k+1) - py(k)
-                seglen2 = dx*dx + dy*dy
-                seglen  = sqrt(seglen2)
-                if (seglen2 > 0.0_R8) then
-                    t = ((qx-px(k))*dx + (qy-py(k))*dy)/seglen2
-                    t = max(0.0_R8, min(1.0_R8, t))
-                else
-                    t = 0.0_R8
-                end if
-                projx = px(k) + t*dx
-                projy = py(k) + t*dy
-                d = sqrt((qx-projx)**2 + (qy-projy)**2)
-                if (d < perp) then
-                    perp = d
-                    arc  = cum + t*seglen
-                end if
-                cum = cum + seglen
-            end do
-            total = cum
-        end subroutine
-
-    end subroutine
-
-    ! Collect unique coordinates of grid boundary-face vertices.
-    subroutine CollectBoundaryNodes(simgrid, bx, by)
-        type(GridUDT), intent(in)               :: simgrid
-        real(R8), allocatable, intent(out)      :: bx(:), by(:)
-        integer(I8)                             :: i
-        logical, allocatable                    :: isbnode(:)
-        allocate(isbnode(simgrid%vert%ntot))
-        isbnode = .false.
-        do i = 1, simgrid%face%ntot
-            if (simgrid%face%BF(i)) then
-                isbnode(simgrid%face%vert(i, 1)) = .true.
-                isbnode(simgrid%face%vert(i, 2)) = .true.
-            end if
-        end do
-        bx = pack(simgrid%vert%x, isbnode)
-        by = pack(simgrid%vert%y, isbnode)
-    end subroutine
-
-    ! Poloidal (fan) structure-endpoint pinning: for each requested endpoint,
-    ! insert a grid node onto the NON-ALIGNED wall boundary face that carries
-    ! it (a fan-gap face a flux surface cannot reach), splitting that face at
-    ! the endpoint's arclength. Runs in the grid phase before cell construction,
-    ! so the split propagates into the (arbitrary-polygon) fan cell. Only faces
-    ! that actually carry a requested endpoint mid-span are touched, so the
-    ! off/unforced path is unchanged.
-    subroutine PinPoloidalStructureEndpoints(grid, ggtmdata, topomesh, &
-        forcedx, forcedy, tol)
-
-        ! Arguments
-        class(GGGridUDT), intent(inout)         :: grid
-        class(GGTMDataUDT)                      :: ggtmdata
-        class(TopomeshUDT), intent(in)          :: topomesh
-        real(R8), intent(in)                    :: forcedx(:), forcedy(:), tol
-
-        ! Local
-        integer(I8)                             :: ic, i, bestface, nold, pos
-        real(R8)                                :: perp, arc, total, bestperp, &
-            bestarc, cx, cy
-        real(R8), allocatable, dimension(:)     :: newdlcv
-        integer(I8), allocatable, dimension(:)  :: newvert
-        logical, allocatable, dimension(:)      :: newisn
-        real(R8), parameter                     :: perptol = 5e-3_R8
-
-        associate(face => topomesh%face, facedata => ggtmdata%face)
-        do ic = 1, size(forcedx)
-            cx = forcedx(ic); cy = forcedy(ic)
-
-            ! Nearest non-aligned (radial, on-wall) boundary face carrying the
-            ! endpoint. Its own line vertices give the arclength coordinate.
-            bestface = 0; bestperp = huge(1.0_R8); bestarc = 0.0_R8
-            do i = 1, face%ntot
-                if (face%type(i) /= TMfacebndID) cycle
-                if (.not. allocated(facedata(i)%line%xv)) cycle
-                if (size(facedata(i)%line%xv) < 2) cycle
-                call ProjLine(cx, cy, facedata(i)%line%xv, facedata(i)%line%yv, &
-                    perp, arc, total)
-                if (perp < bestperp) then
-                    bestperp = perp; bestface = i; bestarc = arc
-                end if
-            end do
-            if (bestface == 0 .or. bestperp > perptol) cycle
-
-            ! Insert the endpoint into that face's line, PRESERVING all its
-            ! existing (radial-distribution) vertices - only ADD the new node.
-            ! Skip if a vertex already sits within tol (a node is there), or if
-            ! it would land on an endpoint of the line.
-            nold = size(facedata(bestface)%line%dlcv)
-            if (nold < 2) cycle
-            if (any(abs(facedata(bestface)%line%dlcv - bestarc) < tol)) cycle
-            if (bestarc <= facedata(bestface)%line%dlcv(1) .or. &
-                bestarc >= facedata(bestface)%line%dlcv(nold)) cycle
-            pos = count(facedata(bestface)%line%dlcv < bestarc)
-            newdlcv = [facedata(bestface)%line%dlcv(1:pos), bestarc, &
-                       facedata(bestface)%line%dlcv(pos+1:nold)]
-            newvert = [facedata(bestface)%line%vert(1:pos), grid%vert%ntot+1, &
-                       facedata(bestface)%line%vert(pos+1:nold)]
-            newisn  = [facedata(bestface)%line%isnodevert(1:pos), .false., &
-                       facedata(bestface)%line%isnodevert(pos+1:nold)]
-            call facedata(bestface)%line%AddVertexCoordinates(newdlcv)
-            call facedata(bestface)%line%AddVertexIDs(newvert, newisn)
-            grid%vert%ntot = grid%vert%ntot + 1
-            call facedata(bestface)%line%UpdateSegmentData(ggtmdata)
-            print *, 'PinPoloidalStructureEndpoints: inserted wall node at (', &
-                cx, ',', cy, ')'
-        end do
-        end associate
-
-    contains
-
-        subroutine ProjLine(qx, qy, px, py, perp, arc, total)
-            real(R8), intent(in)  :: qx, qy, px(:), py(:)
-            real(R8), intent(out) :: perp, arc, total
-            integer(I8)           :: k
-            real(R8)              :: dx, dy, L2, L, t, prx, pry, d, cum
-            perp = huge(1.0_R8); arc = 0.0_R8; cum = 0.0_R8
-            do k = 1, size(px)-1
-                dx = px(k+1)-px(k); dy = py(k+1)-py(k)
-                L2 = dx*dx + dy*dy; L = sqrt(L2)
-                t = 0.0_R8
-                if (L2 > 0.0_R8) t = max(0.0_R8, min(1.0_R8, &
-                    ((qx-px(k))*dx + (qy-py(k))*dy)/L2))
-                prx = px(k) + t*dx; pry = py(k) + t*dy
-                d = sqrt((qx-prx)**2 + (qy-pry)**2)
-                if (d < perp) then; perp = d; arc = cum + t*L; end if
-                cum = cum + L
-            end do
-            total = cum
-        end subroutine
-
-    end subroutine
-
-    ! Fan/grazing structure-endpoint pinning by native boundary-cell splitting.
-    ! For each requested endpoint that no grid boundary node reaches within tol
-    ! (the divertor fan corners, which no flux surface can reach), a real grid
-    ! node is added ON the wall at the endpoint: the carrying boundary face is
-    ! split (A-corner, corner-B), the corner is inserted into the adjacent cell's
-    ! vertex loop (GOAT cells are arbitrary polygons, so the cell simply hugs the
-    ! wall through the corner - no separate spoke needed), and the corner is
-    ! inserted into the ggtmdata boundary line so MapVertexPairToFace still finds
-    ! the (now split) faces at label time (this consistency is what the earlier
-    ! attempts lacked -> label explosion). Runs on the GGGridUDT after
-    ! ConstructCellsQuadTria; ExtractSimulationGrid copies the grid verbatim, so
-    ! the corner survives. Each corner is only committed if its line insert
-    ! succeeds, keeping the grid and ggtmdata consistent.
-    subroutine PinFanCorners(grid, ggtmdata, topomesh, forcedx, forcedy, tol)
-
-        ! Arguments
-        class(GGGridUDT), intent(inout)         :: grid
-        type(GGTMDataUDT), intent(inout)        :: ggtmdata
-        class(TopomeshUDT), intent(in)          :: topomesh
-        real(R8), intent(in)                    :: forcedx(:), forcedy(:), tol
-
-        ! Grid snapshot (refreshed before every corner, so a corner that shares
-        ! a wall face with an already-pinned neighbour sees the split sub-face)
-        real(R8), allocatable, dimension(:)     :: vx, vy
-        integer(I8), allocatable, dimension(:)  :: fv1, fv2, flbl, freg, &
-            cvert, cvp1, cvp2, creg
-        integer(I8)                             :: nvert, nface, ncell
-        logical, allocatable, dimension(:)      :: iswall
-
-        ! Per-corner cell rebuild
-        integer(I8), allocatable, dimension(:)  :: newloop, rot
-
-        ! Local
-        integer(I8)                             :: ic, f, c, av, bv, lbl, vid, &
-            m, lb, k, bestf, npin, pv
-        real(R8)                                :: cx, cy, perp, t, bestperp, &
-            dmin, seglen, bestseglen
-
-        ! Node actually inserted (the endpoint itself, or its projection onto
-        ! the wall chord when the endpoint would fold the cell) and the split
-        ! applied to the rebuilt cell (0: kept whole; k: along node-rot(k))
-        real(R8)                                :: nx, ny
-        integer(I8)                             :: ksplit
-
-        ! A corner is accepted onto its nearest interior wall face only if its
-        ! perpendicular offset is small both in absolute terms and relative to
-        ! that face's length. Genuine wall junctions (even ones where the wall
-        ! bends off the grid chord) sit at ratio < 0.3 and perp < ~7 mm here;
-        ! apex/X-point corners project at ratio > 4 and perp > 25 mm and are
-        ! rejected (they already sit on a node in practice).
-        real(R8), parameter                     :: perptol = 1.5e-2_R8
-        real(R8), parameter                     :: perpratio = 0.5_R8
-
-        npin = 0
-
-        ! One corner at a time. Each pinned corner mutates the grid (a new
-        ! vertex, the wall face split in two, the adjacent cell rebuilt to hug
-        ! it) and the ggtmdata boundary line, so the snapshot is retaken at the
-        ! top of every pass.
-        do ic = 1, size(forcedx)
-            cx = forcedx(ic); cy = forcedy(ic)
-
-            ! (Re)snapshot the current grid
-            vx  = grid%vert%x%Get();  vy = grid%vert%y%Get()
-            fv1 = grid%face%v1%Get(); fv2 = grid%face%v2%Get()
-            flbl = grid%face%label%Get(); freg = grid%face%region%Get()
-            cvert = grid%cell%vert%Get()
-            cvp1 = grid%cell%vp1%Get(); cvp2 = grid%cell%vp2%Get()
-            creg = grid%cell%region%Get()
-            nvert = size(vx); nface = size(fv1); ncell = size(cvp1)
-
-            ! Wall faces (non-aligned or aligned boundary)
-            if (allocated(iswall)) deallocate(iswall)
-            allocate(iswall(nface)); iswall = .false.
-            do f = 1, nface
-                if (flbl(f) >= 1 .and. flbl(f) <= topomesh%face%ntot) then
-                    if (topomesh%face%type(flbl(f)) == TMfacebndID .or. &
-                        topomesh%face%type(flbl(f)) == TMfacealbndID) iswall(f) = .true.
-                end if
-            end do
-
-            ! Already reached by a wall node within tol? -> nothing to do
-            dmin = huge(1.0_R8)
-            do f = 1, nface
-                if (.not. iswall(f)) cycle
-                dmin = min(dmin, hypot(vx(fv1(f))-cx, vy(fv1(f))-cy), &
-                                 hypot(vx(fv2(f))-cx, vy(fv2(f))-cy))
-            end do
-            if (dmin < tol) cycle
-
-            ! Wall face whose segment the corner lies on (interior)
-            bestf = 0; bestperp = huge(1.0_R8); bestseglen = 0.0_R8
-            do f = 1, nface
-                if (.not. iswall(f)) cycle
-                call SegProj(cx, cy, vx(fv1(f)), vy(fv1(f)), vx(fv2(f)), &
-                    vy(fv2(f)), perp, t)
-                if (t <= 0.02_R8 .or. t >= 0.98_R8) cycle
-                if (perp < bestperp) then
-                    bestperp = perp; bestf = f
-                    bestseglen = hypot(vx(fv2(f))-vx(fv1(f)), vy(fv2(f))-vy(fv1(f)))
-                end if
-            end do
-            if (bestf == 0) cycle
-            if (bestperp > perptol .or. bestperp > perpratio*bestseglen) cycle
-            f = bestf; av = fv1(f); bv = fv2(f); lbl = flbl(f)
-
-            ! Adjacent cell (one containing edge av-bv); only tri/quad handled
-            c = FindCell(av, bv)
-            if (c == 0) cycle
-            if (cvp2(c) > 4) cycle
-            lb = cvp1(c); m = cvp2(c)
-            vid = nvert + 1
-
-            ! Adjacent cell loop with the new node spliced in on the wall edge,
-            ! and the same loop rotated to start at the node (rot(1) == vid)
-            allocate(newloop(0))
-            do k = 1, m
-                newloop = [newloop, cvert(lb + k - 1)]
-                if ((cvert(lb+k-1) == av .and. cvert(lb+mod(k,m)) == bv) .or. &
-                    (cvert(lb+k-1) == bv .and. cvert(lb+mod(k,m)) == av)) then
-                    newloop = [newloop, vid]
-                end if
-            end do
-            pv = findloc(newloop == vid, .true., 1)
-            rot = [newloop(pv:), newloop(1:pv-1)]
-
-            ! Choose where the node goes and how the rebuilt cell is split so
-            ! that every resulting cell is valid (PfcSpliceValid), before
-            ! anything is modified. First the endpoint itself, as originally:
-            ! a triangle becomes a quad (kept whole; a simple non-convex quad is
-            ! split later by SplitNonConvexCells), a quad becomes a pentagon
-            ! split into triangle + quad along a diagonal from the node.
-            ! A grazing endpoint may however lie on the cell side of the wall
-            ! chord BEYOND the cell's opposite side (thin divertor-fan cells):
-            ! splicing it there folds the cell into a self-intersecting polygon,
-            ! which SplitNonConvexCells cannot repair and B2.5 rejects
-            ! (b2agfs: cell not convex / b2agmt: invalid face geometry). Such
-            ! an endpoint is still pinned: its node is placed at its projection
-            ! onto the wall chord, which splits the wall face at the same
-            ! arclength (the structure junction is still resolved), and the cell
-            ! is split along a diagonal from the node into valid cells.
-            nx = cx; ny = cy; ksplit = -1
-            if (size(rot) <= 4) then
-                if (PfcSpliceValid(rot, nx, ny, 0_I8)) ksplit = 0
-            else
-                if (PfcSpliceValid(rot, nx, ny, 3_I8)) then
-                    ksplit = 3
-                else if (PfcSpliceValid(rot, nx, ny, 4_I8)) then
-                    ksplit = 4
-                end if
-            end if
-            if (ksplit < 0) then
-                call SegProj(cx, cy, vx(av), vy(av), vx(bv), vy(bv), perp, t)
-                nx = vx(av) + t*(vx(bv) - vx(av))
-                ny = vy(av) + t*(vy(bv) - vy(av))
-                if (PfcSpliceValid(rot, nx, ny, 3_I8)) then
-                    ksplit = 3
-                else if (size(rot) > 4) then
-                    if (PfcSpliceValid(rot, nx, ny, 4_I8)) ksplit = 4
-                end if
-                if (ksplit > 0) print *, 'PinFanCorners: endpoint at (', cx, &
-                    ',', cy, ') would fold its wall cell; node placed on the ', &
-                    'wall chord at (', nx, ',', ny, ')'
-            end if
-            if (ksplit < 0) then
-                print *, 'PinFanCorners: WARNING endpoint at (', cx, ',', cy, &
-                    ') not pinned: no valid split of its wall cell'
-                deallocate(newloop, rot)
-                cycle
-            end if
-
-            ! Insert the node into the ggtmdata boundary line FIRST; only
-            ! proceed with the grid split if that succeeds (keeps them in sync)
-            if (.not. InsertCornerInLine(lbl, av, bv, vid, nx, ny)) then
-                deallocate(newloop, rot)
-                cycle
-            end if
-
-            ! Commit immediately. Add the new vertex and the two wall sub-faces
-            ! (both keep the wall label/region); split the wall face; rebuild
-            ! the adjacent cell to route through the node. Add before remove
-            ! so cell/face references stay valid, then compact.
-            call grid%AddVert([nx], [ny], [0_I8])
-            grid%vert%ntot = grid%vert%x%Size()
-
-            ! Split the wall face in two
-            call grid%AddFace(reshape([av, vid, vid, bv], [2, 2]), &
-                [lbl, lbl], [freg(f), freg(f)])
-
-            if (ksplit == 0) then
-                ! Triangle -> quad: one cell, no interior face
-                call grid%AddCell(newloop, &
-                    reshape([1_I8, int(size(newloop), I8)], [1, 2]), [creg(c)])
-            else
-                ! Split along the diagonal node-rot(ksplit) into rot(1:ksplit)
-                ! and [rot(1), rot(ksplit:)] (quad -> pentagon is unsupported
-                ! downstream, SplitNonConvexCells only handles <=4 vertices); add
-                ! the diagonal as an interior face (label 0, cell region). For a
-                ! pentagon with ksplit = 3 this is the original triangle + quad.
-                call grid%AddCell(rot(1:ksplit), &
-                    reshape([1_I8, ksplit], [1, 2]), [creg(c)])
-                call grid%AddCell([rot(1), rot(ksplit:)], &
-                    reshape([1_I8, int(size(rot), I8) - ksplit + 2_I8], [1, 2]), &
-                    [creg(c)])
-                call grid%AddFace(reshape([rot(1), rot(ksplit)], [1, 2]), &
-                    [0_I8], [creg(c)])
-            end if
-            deallocate(newloop, rot)
-
-            call RemoveGGCell(grid, [c])
-            call RemoveGGFace(grid, [f])
-            npin = npin + 1
-            print *, 'PinFanCorners: pinned endpoint at (', cx, ',', cy, ')'
-        end do
-        print *, 'PinFanCorners: fan/grazing endpoints pinned =', npin
-
-    contains
-
-        ! Perpendicular distance of (px,py) to segment (x1,y1)-(x2,y2) and the
-        ! normalised projection parameter t in [0,1].
-        subroutine SegProj(px, py, x1, y1, x2, y2, perp, t)
-            real(R8), intent(in)  :: px, py, x1, y1, x2, y2
-            real(R8), intent(out) :: perp, t
-            real(R8)              :: dx, dy, L2
-            dx = x2 - x1; dy = y2 - y1; L2 = dx*dx + dy*dy
-            if (L2 <= 0.0_R8) then
-                t = 0.0_R8; perp = hypot(px-x1, py-y1); return
-            end if
-            t = ((px-x1)*dx + (py-y1)*dy)/L2
-            t = max(0.0_R8, min(1.0_R8, t))
-            perp = hypot(px - (x1+t*dx), py - (y1+t*dy))
-        end subroutine
-
-        ! Validity of the cell(s) produced by splicing a new wall node at
-        ! (nx,ny) into a cell: loop(1) is the new node, loop(2:) the original
-        ! cell in its own vertex order (coordinates from the grid snapshot).
-        ! With ksplit = 0 the spliced cell is kept whole; with ksplit = k
-        ! (3 <= k <= n-1) it is split along the diagonal loop(1)-loop(k) into
-        ! loop(1:k) and [loop(1), loop(k:)]. The spliced loop and every
-        ! resulting cell must be simple polygons with the orientation of the
-        ! original cell and a non-negligible area, so a folded (self-
-        ! intersecting), inverted or overlapping cell can never be produced.
-        function PfcSpliceValid(loop, nx, ny, ksplit) result(ok)
-            integer(I8), intent(in) :: loop(:), ksplit
-            real(R8), intent(in)    :: nx, ny
-            logical                 :: ok
-            real(R8), allocatable   :: px(:), py(:)
-            real(R8)                :: a0, amin
-            integer(I8)             :: n, q
-            ok = .false.
-            n = size(loop)
-            if (n < 4) return
-            allocate(px(n), py(n))
-            px(1) = nx; py(1) = ny
-            do q = 2, n
-                px(q) = vx(loop(q)); py(q) = vy(loop(q))
-            end do
-            a0 = PfcArea(px(2:n), py(2:n))
-            if (abs(a0) <= tiny(1.0_R8)) return
-            amin = 1.0e-6_R8*abs(a0)
-            ok = PfcCellOK(px, py, a0, amin)
-            if (.not. ok .or. ksplit == 0) return
-            if (ksplit < 3 .or. ksplit > n-1) then
-                ok = .false.; return
-            end if
-            ok = PfcCellOK(px(1:ksplit), py(1:ksplit), a0, amin)
-            if (ok) ok = PfcCellOK([px(1), px(ksplit:n)], &
-                [py(1), py(ksplit:n)], a0, amin)
-        end function
-
-        ! A (sub-)cell is acceptable if it keeps the orientation of the
-        ! original cell (signed area a0), has a non-negligible area and no two
-        ! of its edges cross.
-        function PfcCellOK(px, py, a0, amin) result(ok)
-            real(R8), intent(in) :: px(:), py(:), a0, amin
-            logical              :: ok
-            real(R8)             :: a
-            a = PfcArea(px, py)
-            ok = (a*a0 > 0.0_R8) .and. (abs(a) > amin)
-            if (ok) ok = PfcSimple(px, py)
-        end function
-
-        ! Signed (shoelace) area of a polygon
-        function PfcArea(px, py) result(a)
-            real(R8), intent(in) :: px(:), py(:)
-            real(R8)             :: a
-            integer              :: q, q2, n
-            n = size(px); a = 0.0_R8
-            do q = 1, n
-                q2 = mod(q, n) + 1
-                a = a + px(q)*py(q2) - px(q2)*py(q)
-            end do
-            a = 0.5_R8*a
-        end function
-
-        ! True if no two non-adjacent edges of the polygon cross
-        function PfcSimple(px, py) result(simple)
-            real(R8), intent(in) :: px(:), py(:)
-            logical              :: simple
-            integer              :: n, i, j, i2, j2
-            n = size(px); simple = .true.
-            do i = 1, n
-                i2 = mod(i, n) + 1
-                do j = i + 1, n
-                    j2 = mod(j, n) + 1
-                    if (j == i2 .or. j2 == i) cycle    ! adjacent edges
-                    if (PfcSegCross(px(i), py(i), px(i2), py(i2), &
-                                    px(j), py(j), px(j2), py(j2))) then
-                        simple = .false.; return
-                    end if
-                end do
-            end do
-        end function
-
-        ! Proper crossing of segments (x1,y1)-(x2,y2) and (x3,y3)-(x4,y4)
-        function PfcSegCross(x1, y1, x2, y2, x3, y3, x4, y4) result(cross)
-            real(R8), intent(in) :: x1, y1, x2, y2, x3, y3, x4, y4
-            logical              :: cross
-            real(R8)             :: d1, d2, d3, d4
-            d1 = (x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)
-            d2 = (x4-x3)*(y2-y3) - (y4-y3)*(x2-x3)
-            d3 = (x2-x1)*(y3-y1) - (y2-y1)*(x3-x1)
-            d4 = (x2-x1)*(y4-y1) - (y2-y1)*(x4-x1)
-            cross = (d1*d2 < 0.0_R8) .and. (d3*d4 < 0.0_R8)
-        end function
-
-        ! A cell whose vertex loop contains the consecutive edge {u,w}; 0 if none
-        function FindCell(u, w) result(ci)
-            integer(I8), intent(in) :: u, w
-            integer(I8)             :: ci, cc2, lb2, m2, p2, a1, a2
-            ci = 0
-            do cc2 = 1, ncell
-                lb2 = cvp1(cc2); m2 = cvp2(cc2)
-                do p2 = 1, m2
-                    a1 = cvert(lb2 + p2 - 1); a2 = cvert(lb2 + mod(p2, m2))
-                    if ((a1 == u .and. a2 == w) .or. (a1 == w .and. a2 == u)) then
-                        ci = cc2; return
-                    end if
-                end do
-            end do
-        end function
-
-        ! Insert vertex vid at (cx,cy) into the ggtmdata line of topomesh face
-        ! L, between its consecutive vertices A and B. Returns .false. (no
-        ! change) if A,B are not a consecutive pair on that line.
-        function InsertCornerInLine(L, A, B, vid, cx, cy) result(ok)
-            integer(I8), intent(in) :: L, A, B, vid
-            real(R8), intent(in)    :: cx, cy
-            logical                 :: ok
-            integer(I8)             :: n, pp, q
-            real(R8)                :: fr2
-            real(R8), allocatable   :: ndlcv(:)
-            integer(I8), allocatable:: nvert2(:)
-            logical, allocatable    :: nisn(:)
-            ok = .false.
-            if (L < 1 .or. L > size(ggtmdata%face)) return
-            if (.not. allocated(ggtmdata%face(L)%line%vert)) return
-            n = size(ggtmdata%face(L)%line%vert)
-            if (n < 2 .or. .not. allocated(ggtmdata%face(L)%line%dlcv)) return
-            pp = 0
-            do q = 1, n-1
-                if ((ggtmdata%face(L)%line%vert(q) == A .and. &
-                     ggtmdata%face(L)%line%vert(q+1) == B) .or. &
-                    (ggtmdata%face(L)%line%vert(q) == B .and. &
-                     ggtmdata%face(L)%line%vert(q+1) == A)) then
-                    pp = q; exit
-                end if
-            end do
-            if (pp == 0) return
-            fr2 = hypot(cx - vx(A), cy - vy(A)) / max(hypot(vx(B)-vx(A), &
-                vy(B)-vy(A)), 1e-30_R8)
-            associate(ln => ggtmdata%face(L)%line)
-            if (ln%vert(pp) == A) then
-                ndlcv = [ln%dlcv(1:pp), ln%dlcv(pp)+fr2*(ln%dlcv(pp+1)-ln%dlcv(pp)), &
-                         ln%dlcv(pp+1:n)]
-            else
-                ndlcv = [ln%dlcv(1:pp), ln%dlcv(pp)+(1.0_R8-fr2)*(ln%dlcv(pp+1)-ln%dlcv(pp)), &
-                         ln%dlcv(pp+1:n)]
-            end if
-            nvert2 = [ln%vert(1:pp), vid, ln%vert(pp+1:n)]
-            nisn   = [ln%isnodevert(1:pp), .false., ln%isnodevert(pp+1:n)]
-            call ln%AddVertexCoordinates(ndlcv)
-            call ln%AddVertexIDs(nvert2, nisn)
-            call ln%UpdateSegmentData(ggtmdata)
-            end associate
-            ok = .true.
-        end function
-
-    end subroutine
-
     ! Unstructured aligned grid generator
     subroutine GenerateUnstructuredAlignedGrid(simgrid, topomesh, magneticField, &
         vessel, fieldtracer, boundarytracer, streamlinetracer, options, &
@@ -1793,14 +1149,6 @@ module ggmod_gridgeneration2D
         call AddTopologicalMeshTubeContoursLineRefinementData(ggtmdata, &
             topomesh, vessel, options)
 
-        ! Poloidal (fan) structure-endpoint pinning: split the non-aligned wall
-        ! boundary faces carrying a requested endpoint, before cells are built
-        if (options%pinstructureendpoints .and. size(options%forcedxpol) > 0) then
-            call PinPoloidalStructureEndpoints(grid, ggtmdata, topomesh, &
-                options%forcedxpol, options%forcedypol, &
-                options%pinstructureendpointstol)
-        end if
-
         ! Generate elemental flux tubes for gridding
         call ConstructTopologicalMeshCellFluxTubes(grid, ggtmdata, topomesh, &
             fieldtracer, magneticField, options)
@@ -1862,15 +1210,6 @@ module ggmod_gridgeneration2D
                 'unknown cell construction method: ' // options%cellconstructionmethod)
 
         end select
-
-        ! Pin fan/grazing structure endpoints (those no flux surface can reach)
-        ! by native boundary-cell splitting on the built grid, before non-convex
-        ! splitting cleans up any resulting concave cell. Only endpoints still
-        ! farther than tol from a wall node are touched.
-        if (options%pinstructureendpoints .and. size(options%forcedx) > 0) then
-            call PinFanCorners(grid, ggtmdata, topomesh, options%forcedx, &
-                options%forcedy, options%pinstructureendpointstol)
-        end if
 
         ! Write intermediate file
         call grid%WriteData('grid_after_cellconstruction')
@@ -6137,13 +5476,7 @@ module ggmod_gridgeneration2D
         type(PolygonUDT), allocatable           :: polc(:)
 
         ! Diagnostics
-        real(R8)                                :: tstart, tend
-
-        ! Structure-endpoint pinning
-        real(R8), allocatable, dimension(:)     :: fpsi, tubemin, tubemax, ptvp
-        integer(I8), allocatable, dimension(:)  :: ptgt, dfidx
-        real(R8)                                :: fpe, ddist, dbestp, fracp
-        integer(I8)                             :: ip, it, kbest, ntf2
+        real(R8)                                :: tstart, tend 
 
         ! Loop
         integer(I8)                             :: i, j, k, cc
@@ -6172,52 +5505,8 @@ module ggmod_gridgeneration2D
         ! Initialize flux surface counter
         nfs = topomesh%nfs
 
-        ! Structure-endpoint pinning: assign each requested endpoint to the
-        ! tube whose distribution face both spans the endpoint's flux value and
-        ! lies nearest the endpoint. Inside the tube loop a distribution vertex
-        ! of that tube is moved onto the endpoint's flux value, so a flux
-        ! surface is traced through it (replacing the nearest existing one).
-        allocate(fpsi(0), ptgt(0))
-        if (options%pinstructureendpoints .and. size(options%forcedx) > 0) then
-            deallocate(fpsi, ptgt)
-            allocate(fpsi(size(options%forcedx)), ptgt(size(options%forcedx)))
-            allocate(tubemin(tube%ntot), tubemax(tube%ntot), dfidx(tube%ntot))
-            fpsi = fieldtracer%Evaluate(options%forcedx, options%forcedy)
-            ptgt = 0
-            tubemin = 0.0_R8; tubemax = 0.0_R8; dfidx = 0
-            do it = 1, tube%ntot
-                ntf2 = tubedata(it)%distributionface
-                if (ntf2 <= 0) cycle
-                if (.not. allocated(facedata(ntf2)%line%xv)) cycle
-                if (size(facedata(ntf2)%line%xv) < 2) cycle
-                dfidx(it) = ntf2
-                ptvp = fieldtracer%Evaluate(facedata(ntf2)%line%xv, &
-                    facedata(ntf2)%line%yv)
-                tubemin(it) = minval(ptvp)
-                tubemax(it) = maxval(ptvp)
-            end do
-            ! Assign each endpoint to the tube whose distribution face both
-            ! spans the endpoint's flux value AND passes nearest the endpoint
-            ! (min distance to any of its vertices -> the wall-adjacent tube,
-            ! whose radial line reaches the wall near the endpoint).
-            do ip = 1, size(fpsi)
-                dbestp = huge(1.0_R8)
-                do it = 1, tube%ntot
-                    if (dfidx(it) <= 0) cycle
-                    if (tubemax(it) <= tubemin(it)) cycle
-                    if (fpsi(ip) < tubemin(it) .or. fpsi(ip) > tubemax(it)) cycle
-                    ddist = minval((facedata(dfidx(it))%line%xv - options%forcedx(ip))**2 + &
-                                   (facedata(dfidx(it))%line%yv - options%forcedy(ip))**2)
-                    if (ddist < dbestp) then
-                        dbestp = ddist
-                        ptgt(ip) = it
-                    end if
-                end do
-            end do
-        end if
-
         ! Loop over all tubes
-        do i = 1, tube%ntot
+        do i = 1, tube%ntot 
 
             ! Initialize
             !-----------
@@ -6296,42 +5585,10 @@ module ggmod_gridgeneration2D
             end if 
             allocate(tfval(size(tx)))
             tfval = fieldtracer%Evaluate(tx, ty)
-            if (tfval(1) < tfval(size(tfval))) then
+            if (tfval(1) < tfval(size(tfval))) then 
                 tfval = tfval(size(tfval):1:-1)
                 dlcv = dlcv(size(dlcv):1:-1)
-            end if
-
-            ! Pin structure endpoints assigned to this tube: move the nearest
-            ! interior distribution vertex onto the endpoint's flux value (so a
-            ! flux surface is traced through it), replacing the surface it was
-            ! on rather than adding one. tfval/dlcv are aligned and monotonic.
-            if (options%pinstructureendpoints .and. size(ptgt) > 0 .and. &
-                size(tfval) > 2) then
-                do ip = 1, size(ptgt)
-                    if (ptgt(ip) /= i) cycle
-                    fpe = fpsi(ip)
-                    if (fpe <= minval(tfval) .or. fpe >= maxval(tfval)) cycle
-                    ! Nearest interior vertex in flux value
-                    kbest = 0
-                    dbestp = huge(1.0_R8)
-                    do k = 2, size(tfval)-1
-                        if (abs(tfval(k) - fpe) < dbestp) then
-                            dbestp = abs(tfval(k) - fpe)
-                            kbest = k
-                        end if
-                    end do
-                    if (kbest == 0) cycle
-                    ! Move it to the arclength where the flux value equals fpe
-                    if (tfval(kbest) > fpe .and. tfval(kbest+1) /= tfval(kbest)) then
-                        fracp = (fpe - tfval(kbest))/(tfval(kbest+1) - tfval(kbest))
-                        dlcv(kbest) = dlcv(kbest) + fracp*(dlcv(kbest+1) - dlcv(kbest))
-                    elseif (tfval(kbest) <= fpe .and. tfval(kbest-1) /= tfval(kbest)) then
-                        fracp = (fpe - tfval(kbest))/(tfval(kbest-1) - tfval(kbest))
-                        dlcv(kbest) = dlcv(kbest) + fracp*(dlcv(kbest-1) - dlcv(kbest))
-                    end if
-                    tfval(kbest) = fpe
-                end do
-            end if
+            end if 
 
             ! Eliminate values outside of bounds
             allocate(keepind(size(tfval)))
@@ -17995,10 +17252,6 @@ module ggmod_gridgeneration2D
         integer(I8)                             :: i, j, k, cc, ncell, &
             nface
 
-        ! Terminal-face disambiguation for pinned corner cells (>1 boundary face)
-        integer(I8)                             :: fref, fbest, kk
-        real(R8)                                :: rvx, rvy, cvx, cvy, dabs, dbest
-
         ! Initialize
         !===========
         associate(&
@@ -18267,30 +17520,13 @@ module ggmod_gridgeneration2D
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the starting cell (number: ', ftc(1), &
                         ' ) has no boundary faces. Not adding face'
-                elseif (size(tcf) > 1) then
-                    ! A pinned structure-endpoint corner cell can carry more than
-                    ! one boundary poloidal face.  The open tube needs exactly one
-                    ! terminal face here: pick the candidate most nearly parallel to
-                    ! the adjacent inner poloidal face (same criterion as the
-                    ! marcher in BuildOpenTubesUS), so the flux-tube chain stays
-                    ! complete (every cell keeps exactly two in-tube faces).
-                    fref = ftf(1)
-                    rvx = v%x(f%vert(fref, 2)) - v%x(f%vert(fref, 1))
-                    rvy = v%y(f%vert(fref, 2)) - v%y(f%vert(fref, 1))
-                    fbest = tcf(1)
-                    dbest = -1.0_R8
-                    do kk = 1, size(tcf)
-                        cvx = v%x(f%vert(tcf(kk), 2)) - v%x(f%vert(tcf(kk), 1))
-                        cvy = v%y(f%vert(tcf(kk), 2)) - v%y(f%vert(tcf(kk), 1))
-                        dabs = abs(rvx*cvx + rvy*cvy) / &
-                            sqrt((rvx*rvx + rvy*rvy)*(cvx*cvx + cvy*cvy) + 1.0e-30_R8)
-                        if (dabs > dbest) then
-                            dbest = dabs
-                            fbest = tcf(kk)
-                        end if
-                    end do
-                    ftf = [fbest, ftf]
-                end if
+                elseif (size(tcf) > 1) then 
+                    ! Unexpected, may be an issue
+                    hasbndf1(i) = .false.
+                    print *, 'ComputeGridData: flux tube: ', i, &
+                        ' is not closed but the starting cell (number: ', ftc(1), &
+                        ' ) has multiple boundary faces. Not adding face'
+                end if 
 
                 ! Find boundary face(s) of last cell
                 tcf = GetCellFace(c, ftc(nftc))
@@ -18308,27 +17544,13 @@ module ggmod_gridgeneration2D
                     print *, 'ComputeGridData: flux tube: ', i, &
                         ' is not closed but the ending cell (number: ', ftc(1), &
                         ' ) has no boundary faces. Not adding face'
-                elseif (size(tcf) > 1) then
-                    ! See the starting-cell case above: a pinned corner cell may
-                    ! have several boundary poloidal faces; add the single terminal
-                    ! most nearly parallel to the adjacent inner poloidal face.
-                    fref = ftf(size(ftf))
-                    rvx = v%x(f%vert(fref, 2)) - v%x(f%vert(fref, 1))
-                    rvy = v%y(f%vert(fref, 2)) - v%y(f%vert(fref, 1))
-                    fbest = tcf(1)
-                    dbest = -1.0_R8
-                    do kk = 1, size(tcf)
-                        cvx = v%x(f%vert(tcf(kk), 2)) - v%x(f%vert(tcf(kk), 1))
-                        cvy = v%y(f%vert(tcf(kk), 2)) - v%y(f%vert(tcf(kk), 1))
-                        dabs = abs(rvx*cvx + rvy*cvy) / &
-                            sqrt((rvx*rvx + rvy*rvy)*(cvx*cvx + cvy*cvy) + 1.0e-30_R8)
-                        if (dabs > dbest) then
-                            dbest = dabs
-                            fbest = tcf(kk)
-                        end if
-                    end do
-                    ftf = [ftf, fbest]
-                end if
+                elseif (size(tcf) > 1) then 
+                    ! Unexpected, may be an issue
+                    hasbndf2(i) = .false.
+                    print *, 'ComputeGridData: flux tube: ', i, &
+                        ' is not closed but the ending cell (number: ', ftc(1), &
+                        ' ) has multiple boundary faces. Not adding face'
+                end if 
             else 
                 ! Closed tube
                 fd%isclosedft(i) = .true. 
