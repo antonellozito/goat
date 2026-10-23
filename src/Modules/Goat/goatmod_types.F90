@@ -1084,7 +1084,7 @@ module goatmod_types
             call ReadSingleLine(filespec, chardummy, reachedeof) ! header
             do i = 1, grid%data%ndiv
                 ! Read
-                read(filespec, *) idum(0), grid%data%divFcP(i, 1), &
+                read(filespec, *) grid%data%divFcP(i, 1), &
                     grid%data%divFcP(i, 2)
             end do
 
@@ -1468,8 +1468,7 @@ module goatmod_types
         grid%data%fluxdata%nFt  = idum(6)
 
         ! Secondary array dimensions
-        ! Common-file labels are limited to 32 characters.
-        call ReadArray (filespec,5,idum,'nCmxVx,nCmxFc,nVmxCv,nVmxFc,nCmx')
+        call ReadArray (filespec,5,idum,'nCmxVx,nCmxFc,nVmxCv,nVmxFc,nCmxNv')
 
         ! Add to grid
         grid%cell%nvert = idum(0)
@@ -1524,10 +1523,6 @@ module goatmod_types
             call ReadArray(filespec, 1, idum, 'topoflag')
             grid%data%topoflag = idum(0)
 
-            ! Read SOLPS geometry ID
-            call ReadArray(filespec, 1, idum, 'GEOMETRY_ID')
-            grid%data%SOLPSgeometryID = idum(0)
-
             ! Read number of topological points
             call ReadArray(filespec, 6, idum, 'nX,nO,nS,nT,nDiv,nDivFc')
             grid%data%nxp = idum(0)
@@ -1541,7 +1536,6 @@ module goatmod_types
         else
             ! Initialize to zero
             grid%data%topoflag = 0
-            grid%data%SOLPSgeometryID = 13
             grid%data%nxp = 0
             grid%data%nop = 0
             grid%data%nsp = 0
@@ -1553,11 +1547,9 @@ module goatmod_types
         end if
 
         ! Allocate
-        allocate(grid%data%xpointID(grid%data%nxp), &
-            grid%data%opointID(grid%data%nop), &
-            grid%data%spointID(grid%data%nsp), &
-            grid%data%tpointID(grid%data%ntp), &
-            grid%data%isprimaryxp(grid%data%nxp), &
+        allocate(grid%data%xpointID(idum(0)), grid%data%opointID(idum(1)), &
+            grid%data%spointID(idum(2)), grid%data%tpointID(idum(3)), &
+            grid%data%isprimaryxp(idum(0)), &
             grid%data%divFcP(grid%data%ndiv, 2), grid%data%divFc(grid%data%ndivFc), &
             grid%data%spointdivID(grid%data%nsp), grid%data%tpointdivID(grid%data%ntp), &
             grid%data%spointxpID(grid%data%nsp), grid%data%sepID(grid%data%nsep))
@@ -1624,11 +1616,12 @@ module goatmod_types
                     idum(0)
             end do
 
-            ! Read O-point data
-            call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
-            do i = 1, grid%data%nop
-                read(filespec, *) grid%data%opointID(i)
-            end do
+            ! Read O-point data - not yet written in b2fgmtry
+            !call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
+            !do i = 1, grid%data%nop
+            !    ! Read
+            !    read(filespec, *) grid%data%opointID(i)
+            !end do
 
             ! Read strike point data
             call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
@@ -1649,6 +1642,7 @@ module goatmod_types
             ! Read divertor data
             call ReadSingleLine(filespec, chardummy2, reachedeof) ! header
             do i = 1, grid%data%ndiv
+                ! Read
                 read(filespec, *) grid%data%divFcP(i, 1), &
                     grid%data%divFcP(i, 2)
             end do
@@ -2307,7 +2301,7 @@ module goatmod_types
             end do
 
             ! Divertor target data
-            tempstring  = '*cf: div divFcP(:,1) divFcP(:,2)'
+            tempstring  = '*cf: divFcP1 divFcP2'
             write(fu, '(a)' ) tempstring
             do i = 1, nDiv
                 fmt = '(3'//Ifm//')'
